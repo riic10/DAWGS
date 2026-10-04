@@ -17,6 +17,8 @@ export function createPet(dog, input, canPet, camera) {
   let leanY = 0;
 
   return {
+    // 0..1: how much the dog is being petted right now (eased), e.g. for sound.
+    get amount() { return envelope; },
     update(dt) {
       const stick = input.state.pet;
       const allowed = canPet();

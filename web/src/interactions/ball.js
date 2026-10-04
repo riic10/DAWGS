@@ -72,7 +72,7 @@ export function createBall({ scene, camera, dog, input, world, onState }) {
   function turnToward(azimuth, dt) {
     const d = angleDelta(dog.facing, azimuth);
     const stepAngle = Math.sign(d) * Math.min(Math.abs(d), BALL.turnSpeed * dt);
-    dog.setPose(dog.root.position, dog.facing + stepAngle);
+    dog.setFacing(dog.facing + stepAngle);
     return Math.abs(d) < 0.05;
   }
 
@@ -91,10 +91,10 @@ export function createBall({ scene, camera, dog, input, world, onState }) {
       const stepLen = Math.min(remaining, BALL.runSpeed * upm * dt);
       const nx = p.x + Math.sin(dog.facing) * stepLen;
       const nz = p.z + Math.cos(dog.facing) * stepLen;
-      const G = groundAt(nx, nz) ?? fallbackGround;
-      dog.setPose(tmp.set(nx, G.y, nz), dog.facing, G.normal);
+      dog.moveOnGround(nx, nz); // the dog keeps all four paws on the ground and leans with the slope
       runTime += dt;
-      dog.anim.runHop = 0.06 * dog.height * Math.abs(Math.sin(Math.PI * BALL.hopsPerSecond * runTime));
+      // sin², not |sin|: lands softly instead of bouncing off a hard corner.
+      dog.anim.runHop = 0.06 * dog.height * Math.sin(Math.PI * BALL.hopsPerSecond * runTime) ** 2;
     }
     return false;
   }
@@ -263,7 +263,7 @@ export function createBall({ scene, camera, dog, input, world, onState }) {
         const there = runToward(home.x, home.z, dt, () =>
           Math.hypot(dog.root.position.x - home.x, dog.root.position.z - home.z) < 0.02 * dog.length);
         if (there && turnToward(dog.home.facing, dt)) {
-          dog.setPose(home, dog.home.facing, dog.home.normal);
+          dog.moveOnGround(home.x, home.z); // eases into its home stance instead of snapping
           dog.anim.runHop = 0;
           dropInFrontOfDog();
           setState("idle");

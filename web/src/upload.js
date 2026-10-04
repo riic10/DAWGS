@@ -137,7 +137,7 @@ export function createUploadDialog({ onDog, onRename, onTurn, auth }) {
   function showDone() {
     doneBox.hidden = false;
     saveName.hidden = false;
-    doneText.textContent = `${ready.name} is ready!`;
+    doneText.textContent = `${ready.name} is in the scene and on the last card in the sidebar.`;
   }
 
   async function run() {
@@ -157,10 +157,11 @@ export function createUploadDialog({ onDog, onRename, onTurn, auth }) {
       ready = { name, bytes };
       statusEl.textContent = "";
       // The sidebar entry takes over the photo URL (it revokes it on replace).
-      onDog({ name, photoUrl: previewUrl, bytes });
+      onDog({ name, photoUrl: previewUrl, bytes }); // adds the card and swaps the dog in
       previewUrl = URL.createObjectURL(file); // keep the dialog preview alive
       preview.src = previewUrl;
       showDone();
+      if (dialog.open) dialog.close(); // get out of the way: the new dog is in the scene
     } catch (err) {
       console.error(err, "\nSpace said:", err.cause?.message ?? err.cause);
       let message = err.message ?? String(err);

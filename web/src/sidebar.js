@@ -19,6 +19,7 @@ export function createSidebar({ onSelect, onUpload, onRename } = {}) {
   const next = document.getElementById("adopt-next");
   const rename = document.getElementById("adopt-rename");
   const upload = document.getElementById("adopt-upload");
+  const card = document.getElementById("adopt");
 
   const dogs = [...DOGS]; // plus the uploaded dog, when there is one
   let index = 0;
@@ -60,6 +61,10 @@ export function createSidebar({ onSelect, onUpload, onRename } = {}) {
 
     // Add or replace the one uploaded dog (id "upload") and show it.
     setUploaded(entry) {
+      // Flash the card so it's clear the new dog joined the roster.
+      card.classList.remove("adopt-new");
+      void card.offsetWidth; // restart the animation
+      card.classList.add("adopt-new");
       const at = dogs.findIndex((d) => d.id === "upload");
       if (at >= 0) {
         if (dogs[at].photo !== entry.photo) URL.revokeObjectURL(dogs[at].photo);

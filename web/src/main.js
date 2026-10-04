@@ -11,6 +11,7 @@ import { createPet } from "./interactions/pet.js";
 import { createSplatLod } from "./lod.js";
 import { createSidebar, hasModel } from "./sidebar.js";
 import { createUploadDialog } from "./upload.js";
+import { createSounds } from "./sound.js";
 import { createHfAuth } from "./hf-auth.js";
 
 // Backgrounds, picked with ?scene=<name>. The first is the default.
@@ -109,6 +110,30 @@ const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 controls.enablePan = false; // keep the orbit centred on the dog
 
+// Sound: garden ambience in the woods, petting and ball-chasing effects.
+const soundHint = document.getElementById("sound-hint");
+const muteBtn = document.getElementById("mute");
+let soundBlocked = false;
+const showSoundState = () => {
+  const muted = sounds.muted;
+  muteBtn.textContent = muted ? "🔇 Muted" : "🔊 Sound";
+  muteBtn.setAttribute("aria-pressed", String(muted));
+  muteBtn.title = muted ? "Turn sound back on (M)" : "Mute all sound (M)";
+  soundHint.hidden = !soundBlocked || muted;
+};
+const sounds = createSounds({
+  onBlocked: (blocked) => { soundBlocked = blocked; showSoundState(); },
+  onMute: showSoundState,
+});
+showSoundState();
+muteBtn.addEventListener("click", () => sounds.toggleMute());
+// M mutes/unmutes, except while typing (e.g. a dog's name).
+window.addEventListener("keydown", (e) => {
+  if (e.repeat || e.metaKey || e.ctrlKey || e.altKey || e.key.toLowerCase() !== "m") return;
+  if (e.target instanceof HTMLElement && e.target.matches("input, textarea, [contenteditable]")) return;
+  sounds.toggleMute();
+});
+
 // Per-frame work once the scene is up; see main().
 let interactions = null;
 let splatLod = null;
@@ -153,11 +178,12 @@ async function main() {
   maxPixelRatio = setup.maxPixelRatio ?? maxPixelRatio;
   resize();
   obstacles = setup.obstacles;
+  if (setup.ambient) sounds.set(setup.ambient, 1);
 
   // The dog picked in the sidebar, or the first one with a model.
   const first = wantedEntry ?? sidebar.dogs.find(hasModel);
   setStatus(`Loading ${first.name}…`);
-  const dog = await loadDog(scene, setup.dog, setup.shadow, first.splat);
+  const dog = await loadDog(scene, setup.dog, setup.shadow, first.splat, (x, z) => setup.ground.at(x, z));
   shownModel = first.splat;
 
   const target = setup.dog.ground.clone().add(new THREE.Vector3(0, setup.dog.height * 0.5, 0));
@@ -185,7 +211,7 @@ async function main() {
   hideLoader();
   sceneDog = dog;
   if (wantedEntry && wantedEntry !== first) selectDog(wantedEntry); // picked while loading
-  window.snoopy = { scene, camera, controls, dog, ball, setup, arduino: input, lod: splatLod, dogs: sidebar, upload: uploadDialog, auth }; // for console tweaking
+  window.snoopy = { scene, camera, controls, dog, ball, setup, arduino: input, lod: splatLod, dogs: sidebar, upload: uploadDialog, auth, sounds }; // for console tweaking
 }
 
 window.addEventListener("resize", () => {
@@ -224,8 +250,10 @@ renderer.setAnimationLoop((time) => {
     if (splatLod) splatLod.update(dt);
     pet.update(dt);
     ball.update(dt);
-    dog.update();
+    dog.update(dt);
     ball.lateUpdate();
+    sounds.set("petting", pet.amount);
+    sounds.set("chase", ball.state === "fetching" || ball.state === "returning" ? 1 : 0);
   } else {
     keepCameraOutOfObstacles();
   }
@@ -233,6 +261,7 @@ renderer.setAnimationLoop((time) => {
     const s = splatLod.state;
     setStatus(`lod ${s.lodSplatScale.toFixed(2)} · ${s.lodRenderScale.toFixed(1)}px · near ${s.proximity.toFixed(2)} · stress ${s.stress.toFixed(2)}`);
   }
+  sounds.update(dt);
   hud.update();
   renderer.render(scene, camera);
 });
