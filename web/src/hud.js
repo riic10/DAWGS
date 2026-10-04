@@ -3,6 +3,8 @@ const GAME_TEXT = {
   idle: "ball: press button to get it ready",
   ready: "ball: ready, press again to throw",
   flying: "ball: thrown",
+  standing: "dog: standing up",
+  collecting: "dog: picking up ball",
   fetching: "dog: fetching",
   returning: "dog: bringing it back",
 };

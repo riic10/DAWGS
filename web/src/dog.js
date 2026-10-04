@@ -1,20 +1,17 @@
 import * as THREE from "three";
 import { SplatMesh } from "@sparkjsdev/spark";
 import { createShadow } from "./shadow.js";
+import { createDogMotion, stepDog } from "../../lib/dog-motion.ts";
+import { createSampleDogRig } from "../../lib/sample-dog-rig.ts";
 
-// Rotation applied to every dog PLY (Euler XYZ, radians). TRELLIS writes them
-// Y-down (usual 3DGS/COLMAP convention), so flip about X. Flipped, they face -X.
-const FLIP = new THREE.Euler(Math.PI, 0, 0);
+const DOG = {
+  url: "/dog_model.spz", // built from dog_model.ply by tools/ply-to-spz.mjs
+  // Rotation applied to the raw PLY (Euler XYZ, radians). The PLY is Y-down
+  // (usual 3DGS/COLMAP convention), so flip it about X. Flipped, it faces -X.
+  rotation: new THREE.Euler(Math.PI, 0, 0),
+};
 
 const UP = new THREE.Vector3(0, 1, 0);
-
-function splatSource(source) {
-  if (source.url) return { url: source.url };
-  // Copy: Spark may hand the buffer to a worker, and the caller keeps the
-  // original for downloads and re-selecting this dog.
-  if (source.fileBytes) return { fileBytes: source.fileBytes.slice(0), fileType: "ply" };
-  throw new Error("Dog model needs a url or fileBytes");
-}
 
 // Loads the dog as root (position on the ground, yaw) -> body (animation
 // offsets) -> splats (flip, scale, centring). The bottom centre of the dog
@@ -22,60 +19,49 @@ function splatSource(source) {
 //
 // Facing is an azimuth in radians from +Z toward +X, the same convention as
 // OrbitControls. Animation modules write `dog.anim`; `dog.update()` applies it.
-// `source` is { url } or { fileBytes }; `dog.setModel()` swaps it later while
-// root, body, home and anim (and everything holding the dog) stay the same.
-export async function loadDog(scene, { ground, normal = UP, facing, height }, shadowCfg, source) {
+export async function loadDog(scene, { ground, normal = UP, facing, height, unitsPerMeter, groundHeight }, shadowCfg) {
+  const splats = new SplatMesh({ url: DOG.url, lod: false, enableLod: false, extSplats: true, covSplats: true });
+  await splats.initialized;
+  const rig = createSampleDogRig(splats, groundHeight);
+  const motion = createDogMotion();
+  const noKeys = new Set();
+  const previousPosition = ground.clone();
+  let previousFacing = facing;
+  const attention = { target: null, pickup: 0 };
+  const lookTarget = new THREE.Vector3();
+  const localUp = new THREE.Vector3();
+  const terrainTilt = new THREE.Quaternion();
+  const targetTilt = new THREE.Quaternion();
+
+  splats.quaternion.setFromEuler(DOG.rotation);
+  splats.updateMatrix();
+  const box = splats.getBoundingBox(true).applyMatrix4(splats.matrix);
+  const size = box.getSize(new THREE.Vector3());
+  const scale = height / size.y;
+  splats.scale.setScalar(scale);
+  const center = box.getCenter(new THREE.Vector3());
+  // The rig plants its paws at raw Y = 0.405, above the outliers in the bounds.
+  splats.position.set(-center.x * scale, 0.405 * scale, -center.z * scale);
+
   const root = new THREE.Group();
   const body = new THREE.Group();
   root.add(body);
+  body.add(splats);
   scene.add(root);
 
-  let shadow = null;
+  const length = size.x * scale; // along the facing direction
+  const width = size.z * scale;
+  const shadowRadius = Math.max(length, width) * 0.55;
+  const shadow = createShadow(scene, shadowCfg, shadowRadius, height * 0.0025);
 
   const dog = {
-    root, body, height,
-    splats: null,
-    length: 0, // along the facing direction
-    width: 0,
+    root, body, splats, height, length, width, motion, joints: rig.pose,
+    pickup: 0,
     home: { ground: ground.clone(), normal: normal.clone(), facing },
     facing,
     groundNormal: normal.clone(),
     // Offsets from the animation modules, summed in update().
-    anim: { petHop: 0, petRoll: 0, petYaw: 0, runHop: 0 },
-
-    // Load a model and swap it in, scaled to `height` with its paws at
-    // root's origin. The old model is disposed once the new one is ready.
-    async setModel(src) {
-      const splats = new SplatMesh(splatSource(src));
-      await splats.initialized;
-      splats.quaternion.setFromEuler(FLIP);
-      splats.updateMatrix();
-      const box = splats.getBoundingBox(true).applyMatrix4(splats.matrix);
-      const size = box.getSize(new THREE.Vector3());
-      if (!(size.y > 0)) {
-        splats.dispose();
-        throw new Error("That model has no splats");
-      }
-      const scale = height / size.y;
-      splats.scale.setScalar(scale);
-      const center = box.getCenter(new THREE.Vector3());
-      splats.position.set(-center.x * scale, -box.min.y * scale, -center.z * scale);
-
-      const old = dog.splats;
-      body.add(splats);
-      dog.splats = splats;
-      dog.length = size.x * scale;
-      dog.width = size.z * scale;
-      if (old) {
-        body.remove(old);
-        old.dispose();
-      }
-      const shadowRadius = Math.max(dog.length, dog.width) * 0.55;
-      if (shadow) shadow.setSize(shadowRadius);
-      else shadow = createShadow(scene, shadowCfg, shadowRadius, height * 0.0025);
-      dog.update();
-      return dog;
-    },
+    anim: { petHop: 0, petRoll: 0, petYaw: 0 },
 
     setPose(point, newFacing = dog.facing, groundNormal = dog.groundNormal) {
       dog.facing = newFacing;
@@ -84,30 +70,51 @@ export async function loadDog(scene, { ground, normal = UP, facing, height }, sh
       root.rotation.set(0, newFacing + Math.PI / 2, 0);
     },
 
-    // Turn the dog's resting direction, e.g. when a generated model faces
-    // the wrong way.
-    turn(radians) {
-      dog.home.facing += radians;
-      dog.setPose(root.position, dog.facing + radians);
-    },
-
     // Unit vector the dog faces, on the horizontal plane.
     forward(target = new THREE.Vector3()) {
       return target.set(Math.sin(dog.facing), 0, Math.cos(dog.facing));
     },
 
-    update() {
-      if (!shadow) return;
-      const { petHop, petRoll, petYaw, runHop } = dog.anim;
-      const hop = petHop + runHop;
+    lookAt(point) {
+      attention.target = point ? lookTarget.copy(point) : null;
+    },
+
+    mouthWorld(target = new THREE.Vector3()) {
+      splats.updateWorldMatrix(true, false);
+      return target.copy(rig.pose.mouth).applyMatrix4(splats.matrixWorld);
+    },
+
+    prepareFrame(dt) {
+      stepDog(motion, noKeys, dt);
+    },
+
+    update(dt = 0) {
+      const distance = Math.hypot(root.position.x - previousPosition.x, root.position.z - previousPosition.z) / unitsPerMeter;
+      const turn = angleDelta(previousFacing, dog.facing);
+      if (motion.stand === 1 && motion.target === 1 && dt > 0) {
+        motion.speed = distance / dt;
+        motion.turn = distance > 1e-6 ? 0 : Math.abs(turn) > 1e-6 ? Math.sign(turn) : 0;
+        if (distance > 1e-6 || motion.turn) motion.stride = 1;
+        // Animate from actual fetch travel so the gait follows the existing path motion.
+        motion.phase += (distance || Math.abs(turn) * 0.23 / 1.8) * Math.PI * 2 / 0.4;
+      }
+      previousPosition.copy(root.position);
+      previousFacing = dog.facing;
+      const { petHop: hop, petRoll, petYaw } = dog.anim;
       body.position.y = hop;
       body.rotation.set(petRoll, petYaw, 0);
+      localUp.copy(dog.groundNormal).applyAxisAngle(UP, -root.rotation.y);
+      targetTilt.setFromUnitVectors(UP, localUp);
+      terrainTilt.slerp(targetTilt, 1 - Math.exp(-dt * 10));
+      body.quaternion.premultiply(terrainTilt);
+      attention.pickup = dog.pickup;
+      rig.update(motion, dt, attention);
       shadow.place(root.position, dog.groundNormal);
       shadow.setStrength(1 - Math.min(1, hop / (height * 0.3)) * 0.5);
     },
   };
   dog.setPose(ground, facing, normal);
-  await dog.setModel(source);
+  dog.update();
   return dog;
 }
 

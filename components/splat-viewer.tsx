@@ -72,7 +72,7 @@ export default function SplatViewer({ source, onReady, onLoading }: Props) {
       let frameUpdate: Promise<void> | undefined;
       let released = false;
       let mesh: InstanceType<typeof SplatMesh> | undefined;
-      let rig: { update: (motion: ReturnType<typeof createDogMotion>) => void; dispose: () => void } | undefined;
+      let rig: { update: (motion: ReturnType<typeof createDogMotion>, dt?: number) => void; dispose: () => void } | undefined;
       let removeInput = () => {};
       let ground: InstanceType<typeof THREE.GridHelper> | undefined;
       const resize = new ResizeObserver(() => {
@@ -280,10 +280,10 @@ export default function SplatViewer({ source, onReady, onLoading }: Props) {
             if (next <= 0) keyTaps.delete(key);
             else keyTaps.set(key, next);
           }
-          rig.update(motion);
           displacement.set(motion.x - dog.position.x, 0, motion.z - dog.position.z);
           dog.position.set(motion.x, 0, motion.z);
           dog.rotation.y = motion.yaw + headingOffset;
+          rig.update(motion, dt);
           camera.position.add(displacement);
           controls.target.add(displacement);
           const nextPose = dogPose(motion);

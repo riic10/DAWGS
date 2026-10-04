@@ -102,7 +102,7 @@ document.body.appendChild(renderer.domElement);
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.05, 100);
 
-const spark = new SparkRenderer({ renderer });
+const spark = new SparkRenderer({ renderer, accumExtSplats: true, covSplats: true, autoUpdate: false });
 scene.add(spark);
 
 const controls = new OrbitControls(camera, renderer.domElement);
@@ -111,6 +111,7 @@ controls.enablePan = false; // keep the orbit centred on the dog
 
 // Per-frame work once the scene is up; see main().
 let interactions = null;
+let frameUpdate;
 let splatLod = null;
 let debugLod = params.has("debug");
 let debugLodFrames = 0;
@@ -157,7 +158,10 @@ async function main() {
   // The dog picked in the sidebar, or the first one with a model.
   const first = wantedEntry ?? sidebar.dogs.find(hasModel);
   setStatus(`Loading ${first.name}…`);
-  const dog = await loadDog(scene, setup.dog, setup.shadow, first.splat);
+  const dog = await loadDog(scene, {
+    ...setup.dog, unitsPerMeter: setup.unitsPerMeter,
+    groundHeight: point => setup.ground.at(point.x, point.z)?.y,
+  }, setup.shadow, first.splat);
   shownModel = first.splat;
 
   const target = setup.dog.ground.clone().add(new THREE.Vector3(0, setup.dog.height * 0.5, 0));
@@ -218,13 +222,14 @@ renderer.setAnimationLoop((time) => {
   controls.update();
   if (interactions) {
     const { dog, ball, pet, cameraStick, cameraDistance } = interactions;
+    dog.prepareFrame(dt);
     cameraStick.update(dt);
     cameraDistance.update(dt);
     keepCameraOutOfObstacles();
     if (splatLod) splatLod.update(dt);
     pet.update(dt);
     ball.update(dt);
-    dog.update();
+    dog.update(dt);
     ball.lateUpdate();
   } else {
     keepCameraOutOfObstacles();
@@ -234,6 +239,17 @@ renderer.setAnimationLoop((time) => {
     setStatus(`lod ${s.lodSplatScale.toFixed(2)} · ${s.lodRenderScale.toFixed(1)}px · near ${s.proximity.toFixed(2)} · stress ${s.stress.toFixed(2)}`);
   }
   hud.update();
+  if (!frameUpdate) {
+    scene.updateMatrixWorld(true);
+    camera.updateMatrixWorld();
+    frameUpdate = spark.update({ scene, camera }).then(() => {
+      frameUpdate = undefined;
+    }, (error) => {
+      renderer.setAnimationLoop(null);
+      console.error(error);
+      setStatus(`Animation stopped: ${error.message}. Reload to continue.`);
+    });
+  }
   renderer.render(scene, camera);
 });
 

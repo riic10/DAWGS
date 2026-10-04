@@ -23,6 +23,28 @@ Pick the background with `?scene=`:
 
 Each scene lives in `web/src/scenes/` and says where the dog stands, how the camera may move and how the shadow is drawn.
 
+## Dog animation
+
+The environment keeps the original ball-driven movement. Press **B** once to hold the ball and again to throw it, or use the Arduino button. After the ball lands, a sitting dog finishes standing before it runs to fetch. Its legs animate while running and turning, and it returns to its original pose after bringing the ball home.
+
+The sample dog uses joint chains with fixed bone lengths and bend limits. Paw contacts stay planted between steps, and the neck and head turn separately to track the ball. At pickup, the dog crouches and lowers its head, then carries the ball at its animated mouth. Standing shifts its weight forward before raising its hips.
+
+The sample rig is shared with the studio viewer. Uploaded dogs still use the automatic rig. The woods, office, ball physics, petting, and Arduino camera controls come from the original environment viewer.
+
+From the repository root, `npm run dev:world` also starts this viewer after installing its dependencies in `web/`. Build it with `npm run build:world`.
+
+The environment regression checks run from the repository root:
+
+```sh
+npm install
+npm test
+npm run build:world
+npx playwright install chromium
+npm run test:world
+```
+
+These checks cover joint lengths and bend limits, planted paw contacts, standing before fetch movement, head tracking and pickup, returning to the original pose, rendered animation in both scenes, and simulated Arduino petting and camera distance. Set `PLAYWRIGHT_CHANNEL=chrome` to use an installed Chrome instead of Playwright's Chromium.
+
 ## Arduino
 
 The page reads the Arduino directly over USB with the Web Serial API, so it needs **Chrome or Edge** (on `localhost` or https). There's no server code.

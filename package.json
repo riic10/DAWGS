@@ -4,10 +4,13 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "dev:world": "npm --prefix web run dev",
     "build": "next build --webpack",
+    "build:world": "npm --prefix web run build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test tests/*.test.ts"
+    "test": "tsx --test tests/*.test.ts",
+    "test:world": "playwright test --config playwright.world.config.ts"
   },
   "dependencies": {
     "@gradio/client": "^2.7.1",
