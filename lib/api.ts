@@ -1,15 +1,20 @@
+import { createReadStream } from "node:fs";
+import { stat } from "node:fs/promises";
+import { Readable } from "node:stream";
 import sharp from "sharp";
+import { apiToken, getJob, startGeneration } from "./huggingface.ts";
 import {
   ApiError,
   JOB_TTL_MS,
   MAX_IMAGE_BYTES,
   errorResponse,
+  generationLimit,
   signJob,
-} from "@/lib/jobs";
-import { apiToken, startGeneration } from "@/lib/huggingface";
+  verifyJob,
+} from "./jobs.ts";
 
-export const runtime = "nodejs";
-export const maxDuration = 60;
+// The Dog panel's photo -> 3D dog API. The woods viewer's server serves it at
+// /api (web/vite.config.js), so HF_TOKEN never reaches the browser.
 
 // Keep duplicate clicks on one server process from starting additional GPU jobs.
 const submissions = new Map<
@@ -41,10 +46,29 @@ async function readBody(request: Request) {
   }
 }
 
-export async function POST(request: Request) {
+// GET /api/status: lets the viewer point out a missing token before an upload.
+export function status() {
+  try {
+    apiToken();
+    if (generationLimit() === 0)
+      throw new ApiError(
+        "Photo generation is turned off (GENERATIONS_PER_HOUR=0).",
+        503,
+      );
+    return Response.json(
+      { ready: true },
+      { headers: { "Cache-Control": "no-store" } },
+    );
+  } catch (error) {
+    return errorResponse(error);
+  }
+}
+
+// POST /api/jobs: starts a generation and returns its signed job token.
+export async function createJob(request: Request) {
   try {
     const url = new URL(request.url);
-    // Next may normalize the URL hostname, so retain the browser's request host.
+    // Compare with the host the browser asked for.
     const origin = `${url.protocol}//${request.headers.get("host") ?? url.host}`;
     if (request.headers.get("origin") !== origin)
       throw new ApiError("Submit your image from this website.", 403);
@@ -73,11 +97,7 @@ export async function POST(request: Request) {
       windowStart = Date.now();
       attempts = 0;
     }
-    const configuredLimit = Number(process.env.GENERATIONS_PER_HOUR ?? 20);
-    const limit = Number.isFinite(configuredLimit)
-      ? Math.max(0, configuredLimit)
-      : 20;
-    if (attempts >= limit)
+    if (attempts >= generationLimit())
       throw new ApiError(
         "This demo has reached its generation limit. Please try the sample model.",
         429,
@@ -112,4 +132,63 @@ export async function POST(request: Request) {
   } catch (error) {
     return errorResponse(error);
   }
+}
+
+// GET /api/jobs/:token
+export function jobStatus(token: string) {
+  try {
+    const job = getJob(verifyJob(token, apiToken()));
+    return Response.json(
+      { status: job.status, ...(job.error ? { error: job.error } : {}) },
+      { headers: { "Cache-Control": "no-store" } },
+    );
+  } catch (error) {
+    return errorResponse(error);
+  }
+}
+
+// GET /api/jobs/:token/file: the generated Gaussian splat PLY.
+export async function jobFile(token: string) {
+  try {
+    const job = getJob(verifyJob(token, apiToken()));
+    if (job.status !== "succeeded" || !job.file)
+      throw new ApiError("Your Gaussian model is not available yet.", 409);
+    const info = await stat(job.file);
+    return new Response(
+      Readable.toWeb(createReadStream(job.file)) as ReadableStream,
+      {
+        headers: {
+          "Content-Type": "application/octet-stream",
+          "Content-Length": String(info.size),
+          "Content-Disposition": 'attachment; filename="snoopygs-model.ply"',
+          "Cache-Control": "private, no-store",
+        },
+      },
+    );
+  } catch (error) {
+    return errorResponse(error);
+  }
+}
+
+// Routes a request for /api/... to its handler.
+export async function handleApi(request: Request): Promise<Response> {
+  const [resource, token, file, ...rest] = new URL(request.url).pathname
+    .split("/")
+    .slice(2);
+  const { method } = request;
+  if (resource === "status" && token === undefined && method === "GET")
+    return status();
+  if (resource === "jobs" && token === undefined && method === "POST")
+    return createJob(request);
+  if (resource === "jobs" && token && !rest.length && method === "GET") {
+    let decoded: string;
+    try {
+      decoded = decodeURIComponent(token);
+    } catch {
+      return errorResponse(new ApiError("This job link is invalid.", 403));
+    }
+    if (file === undefined) return jobStatus(decoded);
+    if (file === "file") return jobFile(decoded);
+  }
+  return errorResponse(new ApiError("There's no such API endpoint.", 404));
 }

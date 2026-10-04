@@ -13,6 +13,12 @@ export class ApiError extends Error {
   }
 }
 
+// Submission attempts allowed per hour in this process; 0 turns generation off.
+export function generationLimit() {
+  const configured = Number(process.env.GENERATIONS_PER_HOUR ?? 20);
+  return Number.isFinite(configured) ? Math.max(0, configured) : 20;
+}
+
 export function signJob(id: string, secret: string, now = Date.now()) {
   const payload = Buffer.from(
     JSON.stringify({ id, expires: now + JOB_TTL_MS }),

@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { Client, handle_file } from "@gradio/client";
-import { ApiError, isOutputUrl, JOB_TTL_MS, SPACE_URL } from "./jobs";
+import { ApiError, isOutputUrl, JOB_TTL_MS, SPACE_URL } from "./jobs.ts";
 
 type Job = {
   status: "starting" | "processing" | "succeeded" | "failed";
@@ -26,7 +26,7 @@ export function apiToken(): `hf_${string}` {
   const token = process.env.HF_TOKEN?.trim();
   if (!token?.startsWith("hf_"))
     throw new ApiError(
-      "Generation needs a Hugging Face token. Set HF_TOKEN on the server.",
+      "Generation needs a Hugging Face token. Add HF_TOKEN to .env.local in the repo root, then restart `npm run dev`.",
       503,
     );
   return token as `hf_${string}`;

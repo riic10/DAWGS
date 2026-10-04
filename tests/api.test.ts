@@ -4,9 +4,7 @@ import { rm } from "node:fs/promises";
 import { mock, test } from "node:test";
 import { Client } from "@gradio/client";
 import sharp from "sharp";
-import { POST } from "../app/api/jobs/route";
-import { GET } from "../app/api/jobs/[token]/route";
-import { GET as download } from "../app/api/jobs/[token]/file/route";
+import { createJob, jobFile, jobStatus, status } from "../lib/api";
 import { verifyJob, SPACE_URL, signJob } from "../lib/jobs";
 import { getJob, generationError, startGeneration } from "../lib/huggingface";
 
@@ -19,8 +17,6 @@ const request = (body: unknown, origin = "http://localhost:3000") =>
     headers: { origin },
     body: JSON.stringify(body),
   });
-const params = (token: string) => ({ params: Promise.resolve({ token }) });
-const readRequest = new Request("http://localhost:3000/api/jobs/result");
 async function finished(id: string) {
   for (let i = 0; i < 100; i++) {
     const job = getJob(id);
@@ -111,23 +107,23 @@ test("validated uploads share one authenticated Gradio session, survive polling,
   );
   try {
     assert.equal(
-      (await POST(request({}, "https://another-site.test"))).status,
+      (await createJob(request({}, "https://another-site.test"))).status,
       403,
     );
-    assert.equal((await POST(request(null))).status, 400);
-    assert.equal((await POST(request([]))).status, 400);
+    assert.equal((await createJob(request(null))).status, 400);
+    assert.equal((await createJob(request([]))).status, 400);
     const previewRequest = new Request("http://localhost:3000/api/jobs", {
       method: "POST",
       headers: { origin: "http://127.0.0.1:3000", host: "127.0.0.1:3000" },
       body: "{}",
     });
-    assert.equal((await POST(previewRequest)).status, 400);
+    assert.equal((await createJob(previewRequest)).status, 400);
     for (const image of [
       "data:image/svg+xml;base64,PHN2Zz4=",
       "data:image/png;base64,bm90LWFuLWltYWdl",
     ])
       assert.equal(
-        (await POST(request({ requestId: randomUUID(), image }))).status,
+        (await createJob(request({ requestId: randomUUID(), image }))).status,
         400,
       );
     const body = {
@@ -135,22 +131,22 @@ test("validated uploads share one authenticated Gradio session, survive polling,
       image: `data:image/png;base64,${pixel.toString("base64")}`,
     };
     const [first, second] = await Promise.all([
-      POST(request(body)),
-      POST(request(body)),
+      createJob(request(body)),
+      createJob(request(body)),
     ]);
     assert.equal(first.status, 200);
     assert.equal(second.status, 200);
     const { token } = await first.json();
     assert.deepEqual({ token }, await second.json());
     const id = verifyJob(token, "hf_test_only");
-    assert.equal((await GET(readRequest, params(token))).status, 200);
-    assert.equal((await download(readRequest, params(token))).status, 409);
+    assert.equal(jobStatus(token).status, 200);
+    assert.equal((await jobFile(token)).status, 409);
     assert.equal(
-      (await POST(request({ ...body, requestId: randomUUID() }))).status,
+      (await createJob(request({ ...body, requestId: randomUUID() }))).status,
       429,
     );
-    assert.equal((await GET(readRequest, params("tampered"))).status, 403);
-    assert.equal((await download(readRequest, params("tampered"))).status, 403);
+    assert.equal(jobStatus("tampered").status, 403);
+    assert.equal((await jobFile("tampered")).status, 403);
     assert.equal(connect.mock.callCount(), 1);
     release();
     assert.equal((await finished(id)).status, "succeeded");
@@ -163,26 +159,18 @@ test("validated uploads share one authenticated Gradio session, survive polling,
     assert.equal(closed, true);
     assert.equal(heartbeat.signal.aborted, true);
     assert.equal(fetchMock.mock.callCount(), 1);
-    const status = await (await GET(readRequest, params(token))).json();
-    assert.deepEqual(status, { status: "succeeded" });
+    assert.deepEqual(await jobStatus(token).json(), { status: "succeeded" });
     assert.deepEqual(
-      Buffer.from(
-        await (await download(readRequest, params(token))).arrayBuffer(),
-      ),
+      Buffer.from(await (await jobFile(token)).arrayBuffer()),
       ply,
     );
     assert.equal(
-      (
-        await GET(
-          readRequest,
-          params(signJob("lost-on-restart", "hf_test_only")),
-        )
-      ).status,
+      jobStatus(signJob("lost-on-restart", "hf_test_only")).status,
       410,
     );
     await rm(getJob(id).file!, { force: true });
     delete process.env.HF_TOKEN;
-    assert.equal((await POST(request(body))).status, 503);
+    assert.equal((await createJob(request(body))).status, 503);
   } finally {
     release();
     mock.restoreAll();
@@ -320,4 +308,26 @@ test("Gaussian exports larger than 100 MB stream to disk", async () => {
     if (file) await rm(file, { force: true });
     mock.restoreAll();
   }
+});
+
+test("status tells the viewer whether generation is configured", async (t) => {
+  const saved = { HF_TOKEN: process.env.HF_TOKEN, GENERATIONS_PER_HOUR: process.env.GENERATIONS_PER_HOUR };
+  t.after(() => {
+    for (const [key, value] of Object.entries(saved))
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+  });
+  delete process.env.HF_TOKEN;
+  delete process.env.GENERATIONS_PER_HOUR;
+  let response = status();
+  assert.equal(response.status, 503);
+  assert.match((await response.json()).error, /HF_TOKEN/);
+  process.env.HF_TOKEN = "hf_test_only";
+  response = status();
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { ready: true });
+  process.env.GENERATIONS_PER_HOUR = "0";
+  response = status();
+  assert.equal(response.status, 503);
+  assert.match((await response.json()).error, /turned off/);
 });
