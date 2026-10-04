@@ -30,7 +30,7 @@
       <div><button id="connect" hidden>Connect Arduino</button><span id="serial"></span></div>
       <div id="readings"></div>
       <div id="game"></div>
-      <div class="hint">Keys: hold T pet · B ball · [ ] distance · 0 release</div>
+      <div class="hint">Keys: hold T pet · B ball · [ ] distance · 0 release · arrows camera · R reset view · IJKL pet stick · C recentre sticks</div>
     </div>
     <aside id="adopt" aria-label="Adoption profile">
       <svg class="adopt-frame" viewBox="0 0 248 420" preserveAspectRatio="none" aria-hidden="true">
@@ -42,19 +42,64 @@
       <div class="adopt-photo-wrap">
         <img id="adopt-photo" alt="Snoopy" />
       </div>
-      <h1 id="adopt-name" class="adopt-name">Snoopy</h1>
+      <div class="adopt-name-row">
+        <h1 id="adopt-name" class="adopt-name">Snoopy</h1>
+        <button type="button" id="adopt-rename" class="adopt-rename" title="Rename your dog" aria-label="Rename your dog" hidden>✎</button>
+      </div>
       <ul class="adopt-facts">
         <li><span>Age</span> <strong id="adopt-age">6 months</strong></li>
         <li><span>Breed</span> <strong id="adopt-breed">Beagle</strong></li>
         <li><span>Gender</span> <strong id="adopt-gender">Female</strong></li>
       </ul>
       <p id="adopt-bio" class="adopt-bio"></p>
+      <p id="adopt-note" class="adopt-note" hidden>3D model coming soon</p>
       <div class="adopt-nav">
         <button type="button" id="adopt-prev">← previous</button>
         <span id="adopt-count">1 / 4</span>
         <button type="button" id="adopt-next">next →</button>
       </div>
+      <button type="button" id="adopt-upload" class="adopt-upload">＋ Upload your dog</button>
     </aside>
+    <dialog id="upload" class="upload" aria-labelledby="upload-title">
+      <form method="dialog" class="upload-close"><button aria-label="Close">×</button></form>
+      <h2 id="upload-title">Upload your dog</h2>
+      <section class="upload-account" aria-label="Hugging Face account">
+        <div id="hf-signed-out">
+          <button type="button" id="hf-sign-in" class="hf-sign-in"><span aria-hidden="true">🤗</span> Sign in with Hugging Face</button>
+          <p class="hf-why">Signed out, everyone on your network shares a small daily GPU allowance (about one dog). Signed in, you get your own: 5 GPU minutes a day on a free account, 40 on PRO.</p>
+        </div>
+        <div id="hf-signed-in" class="hf-signed-in" hidden>
+          <img id="hf-avatar" class="hf-avatar" alt="" width="28" height="28" referrerpolicy="no-referrer" />
+          <span class="hf-who">Signed in as <strong id="hf-username"></strong> <span id="hf-pro" class="hf-pro" hidden>PRO</span></span>
+          <button type="button" id="hf-sign-out" class="hf-link">Sign out</button>
+        </div>
+        <p id="hf-not-configured" class="hf-why" hidden>Hugging Face sign-in isn't set up for this site yet, so generations use the shared allowance.</p>
+      </section>
+      <label class="upload-pick">
+        <span>Choose a photo</span>
+        <input type="file" id="upload-file" accept="image/*" />
+      </label>
+      <img id="upload-preview" class="upload-preview" alt="Your photo" hidden />
+      <section class="upload-name" aria-labelledby="upload-name-label">
+        <label id="upload-name-label" for="upload-name">What's your dog's name?</label>
+        <div class="upload-name-row">
+          <input type="text" id="upload-name" autocomplete="off" />
+          <button type="button" id="upload-save-name" hidden>Save name</button>
+        </div>
+      </section>
+      <button type="button" id="upload-generate" class="upload-generate" disabled>Generate</button>
+      <p id="upload-status" class="upload-status" aria-live="polite"></p>
+      <div id="upload-error" class="upload-error" role="alert" hidden>
+        <p id="upload-error-text"></p>
+        <button type="button" id="upload-retry">Retry</button>
+      </div>
+      <div id="upload-done" class="upload-done" hidden>
+        <p id="upload-done-text"></p>
+        <button type="button" id="upload-download">Download .ply</button>
+        <button type="button" id="upload-turn" title="Turn the dog a quarter turn">↻ turn</button>
+      </div>
+      <p class="upload-fineprint">Your photo is sent to the TRELLIS Space on Hugging Face to build the 3D model. If you're signed in, the Space also gets a sign-in token that can only read your public profile, so the GPU time counts against your account.</p>
+    </dialog>
     <div id="loader" aria-live="polite">
       <img src="/snoopy-dance.gif" alt="" width="128" height="102" />
       <p id="loader-text">Loading…</p>

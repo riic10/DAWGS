@@ -6,9 +6,12 @@ import { createHud } from "./hud.js";
 import { createArduinoInput } from "./input/arduino.js";
 import { createBall } from "./interactions/ball.js";
 import { createCameraDistance } from "./interactions/camera-distance.js";
+import { createCameraStick } from "./interactions/camera-stick.js";
 import { createPet } from "./interactions/pet.js";
 import { createSplatLod } from "./lod.js";
-import { createSidebar } from "./sidebar.js";
+import { createSidebar, hasModel } from "./sidebar.js";
+import { createUploadDialog } from "./upload.js";
+import { createHfAuth } from "./hf-auth.js";
 
 // Backgrounds, picked with ?scene=<name>. The first is the default.
 const SCENES = {
@@ -16,7 +19,10 @@ const SCENES = {
   office: () => import("./scenes/office.js"),
 };
 
-const params = new URLSearchParams(location.search);
+// Coming back from "Sign in with Hugging Face" lands on ?code=…; hf-auth
+// handles it and hands back the query string we left with (e.g. ?scene=office).
+const auth = createHfAuth();
+let params = new URLSearchParams(location.search);
 const statusEl = document.getElementById("status");
 const loaderEl = document.getElementById("loader");
 const loaderText = document.getElementById("loader-text");
@@ -30,7 +36,57 @@ const hideLoader = () => loaderEl?.classList.add("done");
 // splat scene is still loading (and even if WebGL is slow to start).
 const input = createArduinoInput();
 const hud = createHud(input);
-const sidebar = createSidebar();
+
+// Sidebar picks -> dog model in the scene. Dogs without a model keep the
+// current one (the card says "coming soon"). Swaps run one at a time and only
+// the latest pick is loaded; picks before the scene is up wait for it.
+let sceneDog = null;
+let shownModel = null; // the splat object currently in the scene
+let wantedEntry = null;
+let swapQueue = Promise.resolve();
+function selectDog(entry) {
+  if (!hasModel(entry)) return;
+  wantedEntry = entry;
+  if (!sceneDog) return;
+  swapQueue = swapQueue.then(async () => {
+    if (entry !== wantedEntry || entry.splat === shownModel) return;
+    setStatus(`Loading ${entry.name}…`);
+    loaderEl?.classList.remove("done");
+    try {
+      await sceneDog.setModel(entry.splat);
+      shownModel = entry.splat;
+      interactions?.ball.reset();
+      setStatus(`${entry.name} · ${sceneDog.splats.numSplats.toLocaleString()} splats`);
+    } catch (err) {
+      console.error(err);
+      setStatus(`Couldn't load ${entry.name}: ${err.message}`);
+    } finally {
+      hideLoader();
+    }
+  });
+}
+const sidebar = createSidebar({
+  onSelect: selectDog,
+  onUpload: () => uploadDialog.open(),
+  onRename: () => uploadDialog.open({ focusName: true }),
+});
+const uploadDialog = createUploadDialog({
+  auth,
+  onDog: ({ name, photoUrl, bytes }) => sidebar.setUploaded({
+    id: "upload",
+    name,
+    age: "—",
+    breed: "—",
+    gender: "—",
+    photo: photoUrl,
+    personality: "Generated from your photo with TRELLIS.",
+    splat: { fileBytes: bytes },
+    scene: null, // shows up in whichever scene is open
+    animation: null,
+  }),
+  onRename: (name) => sidebar.renameUploaded(name),
+  onTurn: () => sceneDog?.turn(Math.PI / 2),
+});
 
 // No MSAA: it doesn't help soft splats and multiplies the cost of blending
 // overlapping ones.
@@ -56,7 +112,7 @@ controls.enablePan = false; // keep the orbit centred on the dog
 // Per-frame work once the scene is up; see main().
 let interactions = null;
 let splatLod = null;
-const debugLod = params.has("debug");
+let debugLod = params.has("debug");
 let debugLodFrames = 0;
 
 // ?debug: draw the ground the ball and dog use (green free, red blocked).
@@ -76,6 +132,14 @@ function drawGroundDebug(ground, center, half) {
 }
 
 async function main() {
+  const back = await auth.ready;
+  if (back?.search) {
+    history.replaceState(null, "", location.pathname + back.search);
+    params = new URLSearchParams(location.search);
+    debugLod = params.has("debug");
+  }
+  if (back?.upload) uploadDialog.open({ name: back.name ?? "" });
+
   const name = params.get("scene") ?? Object.keys(SCENES)[0];
   if (!SCENES[name]) throw new Error(`Unknown scene "${name}" (try: ${Object.keys(SCENES).join(", ")})`);
   setStatus(`Loading ${name}…`);
@@ -90,8 +154,11 @@ async function main() {
   resize();
   obstacles = setup.obstacles;
 
-  setStatus("Loading dog…");
-  const dog = await loadDog(scene, setup.dog, setup.shadow);
+  // The dog picked in the sidebar, or the first one with a model.
+  const first = wantedEntry ?? sidebar.dogs.find(hasModel);
+  setStatus(`Loading ${first.name}…`);
+  const dog = await loadDog(scene, setup.dog, setup.shadow, first.splat);
+  shownModel = first.splat;
 
   const target = setup.dog.ground.clone().add(new THREE.Vector3(0, setup.dog.height * 0.5, 0));
   controls.target.copy(target);
@@ -104,7 +171,8 @@ async function main() {
   interactions = {
     dog,
     ball,
-    pet: createPet(dog, input, ball.dogAtHome),
+    pet: createPet(dog, input, ball.dogAtHome, camera),
+    cameraStick: createCameraStick(input, camera, controls, setup.view),
     cameraDistance: createCameraDistance(input, camera, controls),
   };
   if (setup.splatLod) {
@@ -113,9 +181,11 @@ async function main() {
   }
   if (debugLod) drawGroundDebug(setup.ground, setup.dog.ground, 4 * setup.unitsPerMeter); // ±4 m
 
-  setStatus(`${name} · dog ${dog.splats.numSplats.toLocaleString()} splats`);
+  setStatus(`${name} · ${first.name} · ${dog.splats.numSplats.toLocaleString()} splats`);
   hideLoader();
-  window.snoopy = { scene, camera, controls, dog, ball, setup, arduino: input, lod: splatLod, dogs: sidebar }; // for console tweaking
+  sceneDog = dog;
+  if (wantedEntry && wantedEntry !== first) selectDog(wantedEntry); // picked while loading
+  window.snoopy = { scene, camera, controls, dog, ball, setup, arduino: input, lod: splatLod, dogs: sidebar, upload: uploadDialog, auth }; // for console tweaking
 }
 
 window.addEventListener("resize", () => {
@@ -147,7 +217,8 @@ renderer.setAnimationLoop((time) => {
   const dt = Math.min(timer.getDelta(), 0.1); // no huge steps after a stall or tab switch
   controls.update();
   if (interactions) {
-    const { dog, ball, pet, cameraDistance } = interactions;
+    const { dog, ball, pet, cameraStick, cameraDistance } = interactions;
+    cameraStick.update(dt);
     cameraDistance.update(dt);
     keepCameraOutOfObstacles();
     if (splatLod) splatLod.update(dt);

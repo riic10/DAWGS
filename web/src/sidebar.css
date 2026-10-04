@@ -251,3 +251,212 @@ canvas {
     font-size: 28px;
   }
 }
+
+.adopt-name-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.adopt-rename {
+  margin-top: 6px;
+  font: 18px/1 "Patrick Hand", cursive;
+  color: #3a2f24;
+  background: #fff4c4;
+  border: 2px solid #3a2f24;
+  border-radius: 50% 45% 55% 40%;
+  width: 28px;
+  height: 28px;
+  cursor: pointer;
+}
+
+.adopt-rename:hover { background: #f5d76e; }
+
+.adopt-note {
+  margin: -6px 0 10px;
+  font-size: 15px;
+  color: #c23b2a;
+}
+
+.adopt-upload {
+  display: block;
+  width: 100%;
+  margin-top: 10px;
+  font-family: inherit;
+  font-size: 17px;
+  color: #fff8e8;
+  background: #c23b2a;
+  border: 2px solid #3a2f24;
+  border-radius: 14px 18px 12px 16px;
+  box-shadow: 2px 2px 0 #3a2f24;
+  padding: 5px 10px;
+  cursor: pointer;
+  transform: rotate(0.6deg);
+}
+
+.adopt-upload:hover { background: #a83223; }
+.adopt-upload:active { transform: translateY(1px); box-shadow: 1px 1px 0 #3a2f24; }
+
+/* Upload dialog */
+.upload {
+  width: min(340px, calc(100vw - 32px));
+  padding: 18px 20px 14px;
+  color: #3a2f24;
+  font-family: "Patrick Hand", "Segoe Print", "Comic Sans MS", cursive;
+  background: #fff4d8;
+  border: 2px solid #3a2f24;
+  border-radius: 22px 28px 18px 26px;
+  box-shadow: 4px 5px 0 #3a2f24;
+}
+
+.upload::backdrop { background: rgba(58, 47, 36, 0.35); }
+
+.upload h2 {
+  margin: 0 0 10px;
+  font-family: "Gaegu", "Patrick Hand", cursive;
+  font-size: 28px;
+}
+
+.upload-close { position: absolute; top: 8px; right: 10px; margin: 0; }
+
+.upload-close button {
+  font-family: inherit;
+  font-size: 22px;
+  line-height: 1;
+  color: #3a2f24;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.upload-pick {
+  display: grid;
+  gap: 4px;
+  font-size: 17px;
+}
+
+.upload-pick input { font: 14px system-ui, sans-serif; }
+
+.upload-preview {
+  display: block;
+  width: 100%;
+  max-height: 180px;
+  margin: 10px 0 0;
+  object-fit: contain;
+  background: #fffdf7;
+  border: 2px solid #3a2f24;
+  border-radius: 8px 10px 12px 8px;
+}
+
+.upload-name {
+  margin: 12px 0 0;
+  padding: 8px 10px 10px;
+  background: #fffdf7;
+  border: 2px dashed #7a6854;
+  border-radius: 12px 14px 10px 16px;
+}
+
+.upload-name label { display: block; font-size: 17px; margin-bottom: 4px; }
+
+.upload-name-row { display: flex; gap: 6px; }
+
+.upload-name input {
+  flex: 1;
+  min-width: 0;
+  font: 18px "Patrick Hand", cursive;
+  color: #3a2f24;
+  background: #fff;
+  border: 2px solid #3a2f24;
+  border-radius: 8px;
+  padding: 2px 8px;
+}
+
+.upload button:not(.upload-close button) {
+  font-family: inherit;
+  font-size: 16px;
+  color: #3a2f24;
+  background: #fff4c4;
+  border: 2px solid #3a2f24;
+  border-radius: 40% 55% 45% 50% / 50% 40% 60% 45%;
+  padding: 3px 12px;
+  cursor: pointer;
+}
+
+.upload button:not(.upload-close button):hover { background: #f5d76e; }
+
+.upload .upload-generate {
+  display: block;
+  width: 100%;
+  margin-top: 12px;
+  font-size: 19px;
+  color: #fff8e8;
+  background: #c23b2a;
+  border-radius: 14px 18px 12px 16px;
+}
+
+.upload .upload-generate:hover { background: #a83223; }
+.upload .upload-generate:disabled { opacity: 0.45; cursor: default; background: #c23b2a; }
+
+.upload-status { min-height: 1.4em; margin: 8px 0 0; font-size: 16px; }
+
+.upload-error {
+  margin-top: 8px;
+  padding: 6px 10px;
+  background: #f6c9b4;
+  border: 2px solid #3a2f24;
+  border-radius: 10px 12px 8px 14px;
+}
+
+.upload-error p, .upload-done p { margin: 0 0 6px; font-size: 16px; }
+
+.upload-done { margin-top: 8px; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.upload-done p { flex-basis: 100%; font-size: 18px; color: #2f7a3a; }
+
+.upload-fineprint { margin: 12px 0 0; font-size: 13px; color: #7a6854; line-height: 1.25; }
+
+.upload-account {
+  margin: 0 0 12px;
+  padding: 8px 10px;
+  background: #fffdf7;
+  border: 2px solid #3a2f24;
+  border-radius: 12px 14px 10px 16px;
+}
+
+.upload .hf-sign-in {
+  display: block;
+  width: 100%;
+  font-size: 17px;
+  color: #fff8e8;
+  background: #3a2f24;
+  border-radius: 14px 18px 12px 16px;
+}
+
+.upload .hf-sign-in:hover { background: #57483a; }
+
+.hf-why { margin: 6px 0 0; font-size: 14px; line-height: 1.25; color: #7a6854; }
+
+.hf-signed-in { display: flex; align-items: center; gap: 8px; font-size: 16px; }
+.hf-avatar { border-radius: 50%; border: 2px solid #3a2f24; background: #f7f1e4; }
+.hf-who { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.hf-pro {
+  font-size: 12px;
+  padding: 0 5px;
+  color: #fff8e8;
+  background: #c23b2a;
+  border-radius: 6px;
+}
+
+.upload .hf-link {
+  background: none;
+  border: 0;
+  padding: 0;
+  font-size: 15px;
+  text-decoration: underline;
+  color: #7a6854;
+}
+
+.upload .hf-link:hover { background: none; color: #3a2f24; }
+
+/* `hidden` must win over the display rules above. */
+#adopt [hidden], .upload [hidden] { display: none !important; }

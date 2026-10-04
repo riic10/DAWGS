@@ -26,6 +26,19 @@ export function createHud(input) {
   input.on("connection", showConnection);
   showConnection(input.state.connected);
 
+  // "connected" alone hides the usual failure: data arriving at the wrong baud
+  // rate or in another format, which the parser drops line by line.
+  function linkText(now) {
+    if (!input.state.connected) return null;
+    const { goodAt, badAt, lastBad } = input.state.serial;
+    if (now - goodAt < 1000) return "Arduino connected";
+    if (now - badAt < 1000) {
+      const sample = lastBad.length > 40 ? `${lastBad.slice(0, 40)}…` : lastBad;
+      return `Arduino connected, but its lines aren't understood: "${sample}". Flash arduino/snoopy/snoopy.ino (9600 baud)`;
+    }
+    return "Arduino connected, but no data is arriving";
+  }
+
   let lastDraw = 0;
   return {
     setGame(state) { gameEl.textContent = GAME_TEXT[state] ?? state; },
@@ -34,10 +47,15 @@ export function createHud(input) {
       const now = performance.now();
       if (now - lastDraw < 100) return;
       lastDraw = now;
-      const { touch, button, distance, distanceAt } = input.state;
+      const link = linkText(now);
+      if (link !== null) serialEl.textContent = link;
+      const { touch, button, distance, distanceAt, cam, pet } = input.state;
       const fresh = distance !== null && now - distanceAt < 1000;
+      const stick = ({ x, y, pressed, raw }) =>
+        `${x.toFixed(1)},${y.toFixed(1)}${raw ? ` (${raw.join(",")})` : ""}${pressed ? " ●" : ""}`;
       readingsEl.textContent =
-        `touch ${touch ? "●" : "○"}  button ${button ? "●" : "○"}  distance ${fresh ? `${Math.round(distance)} cm` : "–"}`;
+        `touch ${touch ? "●" : "○"}  button ${button ? "●" : "○"}  distance ${fresh ? `${Math.round(distance)} cm` : "–"}` +
+        `  camera ${stick(cam)}  pet ${stick(pet)}`;
     },
   };
 }
