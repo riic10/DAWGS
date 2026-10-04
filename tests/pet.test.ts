@@ -2,6 +2,27 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createPet } from "../web/src/interactions/pet.js";
 
+test("pet joystick preserves proportional strength, direction, press, and fetch gating", () => {
+  const dog = { anim: { pet: 0, petPhase: 0, petYaw: 0, petPitch: 0 } };
+  const input = { state: { touch: false, pet: { x: 0.3, y: 0.4, pressed: false } } };
+  let available = true;
+  const pet = createPet(dog, input, () => available);
+  const settle = () => { for (let i = 0; i < 300; i++) pet.update(1 / 60); };
+  settle();
+  assert.ok(Math.abs(dog.anim.pet - 0.5) < 0.001);
+  assert.ok(dog.anim.petYaw < 0 && dog.anim.petPitch > 0);
+  input.state.pet.x = -0.3;
+  input.state.pet.y = -0.4;
+  settle();
+  assert.ok(dog.anim.petYaw > 0 && dog.anim.petPitch < 0);
+  input.state.pet = { x: 0, y: 0, pressed: true };
+  settle();
+  assert.ok(dog.anim.pet > 0.99);
+  available = false;
+  settle();
+  assert.equal(dog.anim.pet, 0);
+});
+
 test("touch eases into a sustained response, releases gradually, and yields to fetching", () => {
   const dog = { anim: { pet: 0, petPhase: 0 } };
   const input = { state: { touch: true } };

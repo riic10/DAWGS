@@ -34,6 +34,8 @@
       #dog-panel button { cursor: pointer; }
       #dog-panel small { display: block; opacity: 0.8; }
       #dog-error { color: #ffcaad; }
+      #dog-photo-preview { max-width: 100%; max-height: 120px; object-fit: contain; justify-self: start; border-radius: 4px; }
+      #dog-save { color: #9fd3ff; }
     </style>
   </head>
   <body>
@@ -119,6 +121,12 @@
       <summary>Dog</summary>
       <fieldset id="dog-options" disabled>
         <label>Model <select id="dog-model"><option value="sample">Sample dog</option><option value="standing">Standing dog</option></select></label>
+        <label>Dog photo <input id="dog-photo" type="file" accept="image/png,image/jpeg" /></label>
+        <img id="dog-photo-preview" alt="Selected dog photo" hidden />
+        <small>A PNG or JPEG of one whole dog, up to 3 MB. Hugging Face turns it into a 3D dog in a few minutes.</small>
+        <button id="dog-create" type="button" disabled>Create dog from photo</button>
+        <small id="dog-create-status" role="status"></small>
+        <a id="dog-save" hidden></a>
         <label>Upload dog PLY <input id="dog-upload" type="file" accept=".ply" /></label>
         <small>One full dog, standing or sitting, in a Y-down Gaussian PLY such as a TRELLIS export. Files stay in this tab.</small>
         <button id="dog-pose" type="button">Stand up</button>

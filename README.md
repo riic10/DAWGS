@@ -1,5 +1,5 @@
 # SnoopyGS
-Gaussian-splat beagle in the woods or office, with animated fetching, ball physics, and Arduino input. Rendered with three.js + [Spark](https://sparkjs.dev).
+Gaussian-splat beagle in the woods or office, with animated fetching, ball physics, and Arduino input. Rendered with three.js + [Spark](https://sparkjs.dev). The Dog panel can turn a photo into a new dog with TRELLIS on Hugging Face.
 
 ## Run the viewer
 
@@ -11,13 +11,13 @@ npm --prefix web install
 npm run dev        # opens http://localhost:5173 (also exposed on the LAN for phone testing)
 ```
 
-Set `BROWSER=none` to skip opening a tab.
+Set `BROWSER=none` to skip opening a tab. Making dogs from photos also needs a Hugging Face token; see [Make a dog from a photo](#make-a-dog-from-a-photo).
 
 Pick the background with `?scene=`:
 
 | Scene | URL | Background |
 | --- | --- | --- |
-| `woods` (default) | `/` | `wooded_path_bg.ply`, 4.8M Gaussian splats, rendered with level of detail |
+| `woods` (default) | `/` | `wooded_path_bg.spz`, 4.8M Gaussian splats, rendered with level of detail |
 | `office` | `/?scene=office` | `home_office_bg.glb`, low-poly mesh with placeholder colours |
 
 Each scene lives in `web/src/scenes/` and says where the dog stands, how the camera may move and how the shadow is drawn.
@@ -48,6 +48,32 @@ Direct links: `/?dog=standing` for the woods and `/?scene=office&dog=standing` f
 
 Use an isolated, full-body dog with recognizable paws and muzzle, in an upright Y-down Gaussian PLY such as a TRELLIS export. Facing, translation, and uniform export scale are fitted automatically. Cropped dogs, lying poses, heavy occlusion, arbitrary export axes, and non-dog subjects are outside the supported assumptions. Fitting is geometric, not learned anatomy recognition. Other breeds can need joint and mouth corrections; missing fur, mouth surfaces, or hidden limbs cannot be recovered from the rig alone. A failed world upload reports the problem and keeps the current dog available.
 
+### Make a dog from a photo
+
+In **Dog**, pick a PNG or JPEG of one whole dog (up to 3 MB) under **Dog photo**, then press **Create dog from photo**. TRELLIS on Hugging Face turns it into a Gaussian splat in a few minutes. The new dog joins the **Model** list as **Your dog 1** and gets the same automatic fit, **Adjust dog fit**, petting, and fetch as an uploaded PLY. A dog that finishes mid-fetch or while the fit panel is open waits until the ball is back and the panel is closed. The download link saves the generated PLY. Refreshing the page picks a running generation back up instead of starting another.
+
+Generation runs on the viewer's own server (`lib/api.ts`, served at `/api` by `web/vite.config.js`), so the token never reaches the browser. Create a **Read** access token at https://huggingface.co/settings/tokens and put it in an untracked `.env.local` file at the repository root:
+
+```text
+HF_TOKEN=hf_your_token
+GENERATIONS_PER_HOUR=20
+```
+
+Restart `npm run dev` after adding the token, and don't give it a `VITE_` prefix. Token, quota, and rate-limit problems show up in the panel.
+
+All generation uses this account's shared ZeroGPU quota. Free accounts have limited GPU time and queue priority. Quota exhaustion stops generation; there is no paid fallback or automatic retry. The default limit is 20 submission attempts per hour per server process; use `0` to turn generation off. Only one job runs at a time, so concurrent submissions can't exhaust the quota.
+
+How it works:
+
+- The server checks the photo, strips metadata, preserves transparency, and resizes it to fit within 1024 pixels. Decoded images are limited to 16 megapixels.
+- It connects to `trellis-community/TRELLIS` with `HF_TOKEN`, creates a separate Gradio session per job, and calls `start_session`, `preprocess_image`, `generate_and_extract_glb`, then `extract_gaussian`. The Space also generates a mesh and video along the way; only the Gaussian file is downloaded.
+- It streams the Gaussian to a temporary file from the exact Space's file endpoint before closing the session. It rejects redirects, other hosts, non-Gaussian PLY headers, and files over 512 MB.
+- A signed, expiring job link is saved in browser storage, so a refresh resumes polling. The page calls `/api` on its own server, so requests are same-origin and pass the upload origin check. `GET /api/status` reports a missing token before anything is uploaded.
+
+Generation runs inside the `npm run dev` (or `npm run preview`) process. Jobs, Gradio sessions, deduplication, and limits live in its memory, and generated files go to the OS temporary directory, so a static host or serverless platform can't run it. A job times out after 10 minutes including queue time; cancellation is best effort, so a timed-out remote job may still use quota. Up to three recent jobs are kept for at most an hour, and restarting the server loses them. After an abrupt shutdown, leftover `snoopygs-*.ply` files may need manual cleanup from the OS temporary directory. The Hugging Face Space handles uploaded images and may keep its own cache. Keep this shared-account demo to your team; everyone using it spends the same free quota. If the dev server hits a filesystem watcher limit, run `npm run build`, then `npm run preview` (http://localhost:4173), which serves the photo API too.
+
+Sources: [TRELLIS Space](https://huggingface.co/spaces/trellis-community/TRELLIS), [ZeroGPU quotas](https://huggingface.co/docs/hub/spaces-zerogpu), [Gradio JavaScript client](https://github.com/gradio-app/gradio/tree/main/client/js).
+
 Build the viewer with `npm run build`; `npm run preview` serves the build.
 
 The regression checks run from the repository root:
@@ -62,11 +88,11 @@ npx playwright install chromium
 npm run test:world
 ```
 
-These checks cover joint lengths and bend limits, planted paw contacts, standing before fetch movement, head tracking and pickup, returning to the original pose, rendered animation in both scenes, and simulated Arduino petting and camera distance. Set `PLAYWRIGHT_CHANNEL=chrome` to use an installed Chrome instead of Playwright's Chromium.
+These checks cover joint lengths and bend limits, planted paw contacts, standing before fetch movement, head tracking and pickup, returning to the original pose, rendered animation in both scenes, and simulated Arduino petting and camera distance. They also cover making a dog from a photo against a mocked API (a created dog joining the Model list, server problems, resuming after a refresh, refused photos) and the `/api` server itself. A real generation needs `HF_TOKEN` and free GPU quota. Set `PLAYWRIGHT_CHANNEL=chrome` to use an installed Chrome instead of Playwright's Chromium.
 
 ## Arduino
 
-The page reads the Arduino directly over USB with the Web Serial API, so it needs **Chrome or Edge** (on `localhost` or https). There's no server code.
+The page reads the Arduino directly over USB with the Web Serial API, so it needs **Chrome or Edge** (on `localhost` or https). Arduino input runs entirely in the browser.
 
 1. Plug in the board and click **Connect Arduino** (top left), then pick its port. Chrome remembers it, so later loads and re-plugs reconnect without asking.
 2. Flash `arduino/snoopy/snoopy.ino`. It prints one CSV line per sample at **9600 baud**: `touch,button,distance,camX,camY,camPress,petX,petY,petPress`, e.g. `1,0,42,512,509,0,530,500,0`. Touch, button and the stick presses are 1 while active; distance is in cm (0 or over 400 means no echo); stick axes are raw `analogRead` values. Leave the sticks alone for the first half second after connecting: the page measures where each one rests then (press **C** to measure again), so 3.3V sticks and 12-bit boards work without changes. Lines with just the first three columns still work. Change the column order, baud rate, valid range, stick dead zone or axis directions in `ARDUINO` in `web/src/input/arduino.js`. The sketch's touch, button and distance readers are stubs that return 0; drop your sensor code into them.
@@ -109,6 +135,7 @@ Tuning lives next to the code: `BALL` in `web/src/interactions/ball.js` (throw, 
 `web/public/` symlinks the assets at the repo root. The viewer loads compressed `.spz` copies of the splat files; regenerate them after changing a `.ply`:
 
 ```sh
+cd web
 npm run build:spz                                                   # dog_model.ply -> dog_model.spz
 node tools/ply-to-spz.mjs ../wooded_path_bg.ply ../wooded_path_bg.spz
 ```

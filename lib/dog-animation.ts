@@ -8,6 +8,7 @@ export type { Segment } from "./dog-profile";
 export type DogAttention = {
   target?: Vector3 | null; pickup?: number;
   pet?: number; petPhase?: number; petTarget?: Vector3 | null;
+  petYaw?: number; petPitch?: number;
   mouthTarget?: Vector3 | null; mouthRadius?: number; jawOpen?: number;
 };
 export type GroundHeight = (point: Vector3) => number | undefined;
@@ -154,8 +155,8 @@ export function createDogAnimation(profile: DogProfile) {
         targetYaw = clamp(Math.atan2(to.z, -to.x), -1.15, 1.15);
         targetPitch = clamp(Math.atan2(to.y, Math.hypot(to.x, to.z)), -0.45, 0.9);
       }
-      targetYaw += (petYaw - targetYaw) * pet;
-      targetPitch += (-0.32 - 0.03 * nuzzle - targetPitch) * pet;
+      targetYaw += (petYaw + (attention.petYaw ?? 0) - targetYaw) * pet;
+      targetPitch += (-0.32 - 0.03 * nuzzle + (attention.petPitch ?? 0) - targetPitch) * pet;
       targetPitch += (1.45 - targetPitch) * pickup;
       const follow = 1 - Math.exp(-dt * 10);
       yaw += (targetYaw - yaw) * follow;

@@ -151,6 +151,8 @@ export async function loadDog(scene, { ground, normal = UP, facing, height, unit
       attention.pet = dog.anim.pet;
       attention.petPhase = dog.anim.petPhase;
       attention.petTarget = dog.anim.petTarget;
+      attention.petYaw = dog.anim.petYaw ?? 0;
+      attention.petPitch = dog.anim.petPitch ?? 0;
       rig.update(motion, dt, attention);
       shadow.place(root.position, dog.groundNormal);
     },

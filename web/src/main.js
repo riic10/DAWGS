@@ -12,6 +12,7 @@ import { createSplatLod } from "./lod.js";
 import { createSidebar, hasModel } from "./sidebar.js";
 import { createUploadDialog } from "./upload.js";
 import { createHfAuth } from "./hf-auth.js";
+import { createPhotoDog } from "./photo-dog.js";
 import { createDogCalibrationPanel } from "../../lib/dog-calibration-panel.ts";
 
 // Backgrounds, picked with ?scene=<name>. The first is the default.
@@ -139,6 +140,8 @@ const dogSources = {
   sample: { url: "/dog_model.spz", sample: true },
   standing: { url: "/standing_dog.ply", sample: false },
 };
+// The Model option for a source. Dogs made from photos keep their own option.
+const optionValue = source => source.key ?? (source.file ? "upload" : source.sample ? "sample" : "standing");
 
 // ?debug: draw the ground the ball and dog use (green free, red blocked).
 function drawGroundDebug(ground, center, half) {
@@ -239,10 +242,8 @@ async function main() {
       shownModel = null;
       currentSource = source;
       dogModel.querySelector('option[value="upload"]')?.remove();
-      if (source.file) {
-        dogModel.add(new Option(source.file.name, "upload"));
-        dogModel.value = "upload";
-      } else dogModel.value = source.sample ? "sample" : "standing";
+      if (source.file && !source.key) dogModel.add(new Option(source.file.name, "upload"));
+      dogModel.value = optionValue(source);
       window.snoopy = { scene, camera, controls, dog, ball, setup: world, arduino: input, lod: splatLod, dogs: sidebar, upload: uploadDialog, auth };
       if (!keepPosition) {
         if (!source.sample) calibrationPanel = createDogCalibrationPanel(document.getElementById("dog-calibration"), {
@@ -265,7 +266,7 @@ async function main() {
     } finally { swapping = false; loadingDog = false; dogOptions.disabled = false; hideLoader(); }
   }
   dogModel.onchange = () => { void replaceDog(dogSources[dogModel.value] ?? currentSource).catch(() => {
-    dogModel.value = currentSource.file ? "upload" : currentSource.sample ? "sample" : "standing";
+    dogModel.value = optionValue(currentSource);
   }); };
   dogUpload.onchange = async () => {
     const file = dogUpload.files[0];
@@ -283,6 +284,25 @@ async function main() {
   dogPoseButton.onclick = () => {
     if (interactions && !inspecting) interactions.dog.motion.target = 1 - interactions.dog.motion.target;
   };
+  // A dog made from a photo waits for the ball to come home and the fit panel
+  // to close, then joins the Model list and replaces the current dog.
+  createPhotoDog({
+    canShow: () => Boolean(interactions) && !loadingDog && !inspecting && interactions.ball.dogAtHome(),
+    async show(file, label) {
+      const source = { key: `photo-${file.name}`, file, sample: false };
+      const option = new Option(label, source.key);
+      dogSources[source.key] = source;
+      dogModel.add(option);
+      try {
+        await replaceDog(source);
+      } catch (error) {
+        option.remove();
+        delete dogSources[source.key];
+        dogModel.value = optionValue(currentSource);
+        throw error;
+      }
+    },
+  });
   replaceSceneDog = replaceDog;
   await replaceDog(currentSource).then(() => {
     if (!params.has("dog")) shownModel = first?.splat;
