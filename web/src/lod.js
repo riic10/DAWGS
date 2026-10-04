@@ -31,6 +31,11 @@ export const SPLAT_LOD = {
   targetFrameMs: 18,
   stressFrameMs: 28,
   maxStressDrop: 0.55,
+  // Only hand Spark a new budget when quality has moved this much (0..1).
+  // Every budget change makes Spark remap the woods' splats, and it won't
+  // rebuild the splats (the animated dog included) while a remap waits on its
+  // ~250 ms sort, so nudging the knobs each frame froze the dog at ~4 fps.
+  qualityStep: 0.08,
 };
 
 const KNOBS = ["lodSplatScale", "lodRenderScale", "coneFov0", "coneFov", "coneFoveate"];
@@ -54,6 +59,7 @@ export function createSplatLod({ spark, camera, target, nearDistance, farDistanc
   let proximity = null; // 1 = next to the dog, 0 = far
   let stress = 0;
   let emaDt = goodMs / 1000;
+  let applied = null; // quality last handed to Spark
 
   const state = {
     distance: 0,
@@ -78,7 +84,8 @@ export function createSplatLod({ spark, camera, target, nearDistance, farDistanc
       stress += (wantStress - stress) * (1 - Math.exp(-dt / 0.45));
 
       const quality = proximity * (1 - drop * stress);
-      const knobs = lerpKnobs(distant, near, quality);
+      if (applied === null || Math.abs(quality - applied) >= SPLAT_LOD.qualityStep) applied = quality;
+      const knobs = lerpKnobs(distant, near, applied);
 
       spark.lodSplatScale = knobs.lodSplatScale;
       spark.lodRenderScale = knobs.lodRenderScale;

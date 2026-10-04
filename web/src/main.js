@@ -9,6 +9,7 @@ import { createCameraDistance } from "./interactions/camera-distance.js";
 import { createCameraStick } from "./interactions/camera-stick.js";
 import { createPet } from "./interactions/pet.js";
 import { createSplatLod } from "./lod.js";
+import { createSplatSync } from "./splat-sync.js";
 import { createSidebar, hasModel } from "./sidebar.js";
 import { createUploadDialog } from "./upload.js";
 import { createSounds } from "./sound.js";
@@ -138,6 +139,7 @@ const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerH
 
 const spark = new SparkRenderer({ renderer, accumExtSplats: true, covSplats: true, autoUpdate: false });
 scene.add(spark);
+const splatSync = createSplatSync(spark);
 
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
@@ -393,18 +395,31 @@ renderer.setAnimationLoop((time) => {
   }
   sounds.update(dt);
   hud.update();
-  if (!frameUpdate && !swapping) {
+  // Rebuild the splats every frame so the dog's pose shows at once. Spark's
+  // depth sort (~250 ms with the woods) runs in the background and isn't
+  // restarted while busy; waiting for it before the next update held the
+  // dog's animation to ~4 updates a second. frameUpdate is the latest update,
+  // so a dog swap can wait for it.
+  if (!swapping) {
     scene.updateMatrixWorld(true);
     camera.updateMatrixWorld();
-    frameUpdate = spark.update({ scene, camera }).then(() => {
-      frameUpdate = undefined;
+    const update = spark.update({ scene, camera });
+    if (interactions) {
+      const { dog, ball } = interactions;
+      splatSync.record(ball.attached ? [...dog.splats.children, ball.mesh] : dog.splats.children);
+    }
+    frameUpdate = update;
+    update.then(() => {
+      if (frameUpdate === update) frameUpdate = undefined;
     }, (error) => {
       renderer.setAnimationLoop(null);
       console.error(error);
       setStatus(`Animation stopped: ${error.message}. Reload to continue.`);
     });
   }
+  splatSync.pin();
   renderer.render(scene, camera);
+  splatSync.unpin();
 });
 
 main().catch((err) => {
