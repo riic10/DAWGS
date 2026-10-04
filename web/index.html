@@ -7,15 +7,28 @@
     <style>
       html, body { margin: 0; height: 100%; overflow: hidden; background: #dcd6cc; }
       canvas { display: block; touch-action: none; }
-      #status {
-        position: fixed; left: 12px; bottom: 12px;
-        font: 12px/1.4 system-ui, sans-serif; color: #fff;
+      #status, #hud {
+        position: fixed; left: 12px;
+        font: 12px/1.5 system-ui, sans-serif; color: #fff;
         background: rgba(0, 0, 0, 0.45); padding: 4px 8px; border-radius: 4px;
-        pointer-events: none;
       }
+      #status { bottom: 12px; pointer-events: none; }
+      #hud { top: 12px; display: grid; gap: 2px; }
+      #hud .hint { opacity: 0.7; }
+      #connect {
+        font: inherit; color: #fff; background: #2f6fd6; border: 0;
+        border-radius: 3px; padding: 2px 8px; margin-right: 6px; cursor: pointer;
+      }
+      #readings { font-variant-numeric: tabular-nums; }
     </style>
   </head>
   <body>
+    <div id="hud">
+      <div><button id="connect" hidden>Connect Arduino</button><span id="serial"></span></div>
+      <div id="readings"></div>
+      <div id="game"></div>
+      <div class="hint">Keys: hold T pet · B ball · [ ] distance · 0 release</div>
+    </div>
     <div id="status">Loading…</div>
     <script type="module" src="/src/main.js"></script>
   </body>

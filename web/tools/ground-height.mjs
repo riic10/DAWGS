@@ -3,7 +3,7 @@
 // radius, and prints it in viewer (Y-up, flipped about X) coordinates.
 // Usage: node tools/ground-height.mjs <scene.ply> <x> <z> [radius]
 //   x, z are viewer coordinates (viewer z = -file z).
-import { readFileSync } from "node:fs";
+import { readPly, sigmoid } from "./ply.mjs";
 
 const [file, vx, vz, r = "6"] = process.argv.slice(2);
 if (!file || vx === undefined || vz === undefined) {
@@ -12,21 +12,12 @@ if (!file || vx === undefined || vz === undefined) {
 }
 const cx = Number(vx), cz = -Number(vz), radius = Number(r);
 
-const buf = readFileSync(file);
-const hdrEnd = buf.indexOf("end_header\n") + "end_header\n".length;
-const header = buf.subarray(0, hdrEnd).toString();
-if (!header.includes("binary_little_endian")) throw new Error("Only binary little-endian PLY is supported");
-const props = [...header.matchAll(/property (\w+) (\w+)/g)];
-if (props.some(([, type]) => type !== "float")) throw new Error("Only all-float vertex properties are supported");
-const P = Object.fromEntries(props.map(([, , name], i) => [name, i]));
-const stride = props.length;
-const n = Number(header.match(/element vertex (\d+)/)[1]);
-const f = new Float32Array(buf.buffer.slice(buf.byteOffset + hdrEnd, buf.byteOffset + hdrEnd + n * stride * 4));
+const { n, stride, P, f } = readPly(file);
 
 const pts = [];
 for (let i = 0; i < n; i++) {
   const o = i * stride;
-  if (1 / (1 + Math.exp(-f[o + P.opacity])) < 0.5) continue;
+  if (sigmoid(f[o + P.opacity]) < 0.5) continue;
   const dx = f[o + P.x] - cx, dz = f[o + P.z] - cz;
   if (dx * dx + dz * dz < radius * radius) pts.push([f[o + P.x], f[o + P.y], f[o + P.z]]);
 }

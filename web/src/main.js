@@ -1,6 +1,12 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
-import { SparkRenderer, SplatMesh } from "@sparkjsdev/spark";
+import { SparkRenderer } from "@sparkjsdev/spark";
+import { loadDog } from "./dog.js";
+import { createHud } from "./hud.js";
+import { createArduinoInput } from "./input/arduino.js";
+import { createBall } from "./interactions/ball.js";
+import { createCameraDistance } from "./interactions/camera-distance.js";
+import { createPet } from "./interactions/pet.js";
 
 // Backgrounds, picked with ?scene=<name>. The first is the default.
 const SCENES = {
@@ -8,13 +14,7 @@ const SCENES = {
   office: () => import("./scenes/office.js"),
 };
 
-const DOG = {
-  url: "/dog_model.spz", // built from dog_model.ply by tools/ply-to-spz.mjs
-  // Rotation applied to the raw PLY before placement (Euler XYZ, radians).
-  // The PLY is Y-down (usual 3DGS/COLMAP convention), so flip it about X.
-  rotation: new THREE.Euler(Math.PI, 0, 0),
-};
-
+const params = new URLSearchParams(location.search);
 const statusEl = document.getElementById("status");
 const setStatus = (text) => { statusEl.textContent = text; };
 
@@ -39,90 +39,31 @@ const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 controls.enablePan = false; // keep the orbit centred on the dog
 
-function makeMeshShadow(radius) {
-  const size = 128;
-  const canvas = document.createElement("canvas");
-  canvas.width = canvas.height = size;
-  const ctx = canvas.getContext("2d");
-  const g = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
-  g.addColorStop(0, "rgba(0,0,0,0.45)");
-  g.addColorStop(1, "rgba(0,0,0,0)");
-  ctx.fillStyle = g;
-  ctx.fillRect(0, 0, size, size);
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.colorSpace = THREE.SRGBColorSpace;
-  const mesh = new THREE.Mesh(
-    new THREE.PlaneGeometry(radius * 2, radius * 2),
-    new THREE.MeshBasicMaterial({
-      map: texture,
-      transparent: true,
-      depthWrite: false,
-      polygonOffset: true,
-      polygonOffsetFactor: -1,
-    }),
-  );
-  mesh.rotation.x = -Math.PI / 2;
-  return mesh;
-}
+// Arduino first, so "Connect Arduino" works while the scene is still loading.
+const input = createArduinoInput();
+const hud = createHud(input);
 
-// On a splat background a mesh can't sort against the splats, so the
-// shadow is itself one flat, dark Gaussian (in its local XZ plane); its
-// falloff is the soft edge.
-function makeSplatShadow(radius, opacity) {
-  return new SplatMesh({
-    constructSplats: (splats) => {
-      const sigma = radius / 1.6;
-      splats.pushSplat(
-        new THREE.Vector3(),
-        new THREE.Vector3(sigma, sigma * 0.01, sigma),
-        new THREE.Quaternion(),
-        opacity,
-        new THREE.Color(0, 0, 0),
-      );
-    },
-  });
-}
+// Per-frame work once the scene is up; see main().
+let interactions = null;
 
-// Place the dog so its lowest splat centre touches `ground`, its centre is
-// above it, it's `height` tall and it faces azimuth `facing` (radians from
-// +Z toward +X, the same convention as OrbitControls). The dog stays upright;
-// the shadow lies along the ground's `normal`.
-async function loadDog({ ground, normal = new THREE.Vector3(0, 1, 0), facing, height }, shadowCfg) {
-  const dog = new SplatMesh({ url: DOG.url });
-  await dog.initialized;
-
-  // The flipped model faces -X, so facing azimuth θ needs a yaw of θ + π/2.
-  dog.quaternion
-    .setFromEuler(DOG.rotation)
-    .premultiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), facing + Math.PI / 2));
-  dog.updateMatrix();
-  const box = dog.getBoundingBox(true).applyMatrix4(dog.matrix);
-  const size = box.getSize(new THREE.Vector3());
-  const scale = height / size.y;
-  dog.scale.setScalar(scale);
-  const center = box.getCenter(new THREE.Vector3());
-  dog.position.set(
-    ground.x - center.x * scale,
-    ground.y - box.min.y * scale,
-    ground.z - center.z * scale,
-  );
-  scene.add(dog);
-
-  const radius = Math.max(size.x, size.z) * scale * 0.55;
-  const shadow = shadowCfg.kind === "splat"
-    ? makeSplatShadow(radius, shadowCfg.opacity ?? 0.85)
-    : makeMeshShadow(radius);
-  shadow.quaternion.premultiply(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), normal));
-  // By default lift it a hair (0.25% of the dog's height) so it sits on, not
-  // in, the ground.
-  shadow.position.copy(ground).addScaledVector(normal, shadowCfg.lift ?? height * 0.0025);
-  scene.add(shadow);
-
-  return dog;
+// ?debug: draw the ground the ball and dog use (green free, red blocked).
+function drawGroundDebug(ground, center, half) {
+  const free = [], blocked = [];
+  for (let x = center.x - half; x <= center.x + half; x += 1) {
+    for (let z = center.z - half; z <= center.z + half; z += 1) {
+      const G = ground.at(x, z);
+      if (G) (G.blocked ? blocked : free).push(x, G.y, z);
+    }
+  }
+  for (const [pts, color] of [[free, 0x33dd55], [blocked, 0xdd3333]]) {
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute("position", new THREE.Float32BufferAttribute(pts, 3));
+    scene.add(new THREE.Points(geometry, new THREE.PointsMaterial({ color, size: 3, sizeAttenuation: false })));
+  }
 }
 
 async function main() {
-  const name = new URLSearchParams(location.search).get("scene") ?? Object.keys(SCENES)[0];
+  const name = params.get("scene") ?? Object.keys(SCENES)[0];
   if (!SCENES[name]) throw new Error(`Unknown scene "${name}" (try: ${Object.keys(SCENES).join(", ")})`);
   setStatus(`Loading ${name}…`);
   const setup = await (await SCENES[name]()).load(scene);
@@ -137,7 +78,7 @@ async function main() {
   obstacles = setup.obstacles;
 
   setStatus("Loading dog…");
-  const dog = await loadDog(setup.dog, setup.shadow);
+  const dog = await loadDog(scene, setup.dog, setup.shadow);
 
   const target = setup.dog.ground.clone().add(new THREE.Vector3(0, setup.dog.height * 0.5, 0));
   controls.target.copy(target);
@@ -145,8 +86,18 @@ async function main() {
   camera.position.setFromSphericalCoords(radius, phi, theta).add(target);
   controls.update();
 
-  setStatus(`${name} · dog ${dog.numSplats.toLocaleString()} splats`);
-  window.snoopy = { scene, camera, controls, dog, setup }; // for console tweaking
+  const ball = createBall({ scene, camera, dog, input, world: setup, onState: hud.setGame });
+  hud.setGame(ball.state);
+  interactions = {
+    dog,
+    ball,
+    pet: createPet(dog, input, ball.dogAtHome),
+    cameraDistance: createCameraDistance(input, camera, controls),
+  };
+  if (params.has("debug")) drawGroundDebug(setup.ground, setup.dog.ground, 4 * setup.unitsPerMeter); // ±4 m
+
+  setStatus(`${name} · dog ${dog.splats.numSplats.toLocaleString()} splats`);
+  window.snoopy = { scene, camera, controls, dog, ball, setup, arduino: input }; // for console tweaking
 }
 
 window.addEventListener("resize", () => {
@@ -172,9 +123,23 @@ function keepCameraOutOfObstacles() {
   }
 }
 
-renderer.setAnimationLoop(() => {
+const timer = new THREE.Timer();
+renderer.setAnimationLoop((time) => {
+  timer.update(time);
+  const dt = Math.min(timer.getDelta(), 0.1); // no huge steps after a stall or tab switch
   controls.update();
-  keepCameraOutOfObstacles();
+  if (interactions) {
+    const { dog, ball, pet, cameraDistance } = interactions;
+    cameraDistance.update(dt);
+    keepCameraOutOfObstacles();
+    pet.update(dt);
+    ball.update(dt);
+    dog.update();
+    ball.lateUpdate();
+  } else {
+    keepCameraOutOfObstacles();
+  }
+  hud.update();
   renderer.render(scene, camera);
 });
 
