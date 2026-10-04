@@ -1,3 +1,10 @@
 # 271 MB source scan: over GitHub's 100 MB limit. The viewer loads wooded_path_bg.spz;
 # regenerate it with: cd web && node tools/ply-to-spz.mjs ../wooded_path_bg.ply ../wooded_path_bg.spz
 wooded_path_bg.ply
+
+node_modules/
+.next/
+.env*
+*.tsbuildinfo
+playwright-report/
+test-results/
