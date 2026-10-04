@@ -1,4 +1,9 @@
 # SnoopyGS
+
+This repository contains two apps: the scene and Arduino viewer in `web/`, and the Next.js image-to-3D app at the repository root. Each has its own setup and controls, described below.
+
+## Scene and Arduino viewer (`web/`)
+
 Gaussian-splat beagle composited into a background scene, rendered with three.js + [Spark](https://sparkjs.dev).
 
 ## Run the viewer
@@ -78,3 +83,81 @@ The ball and the dog's fetch run use a ground heightfield of the woods (`wooded_
 ```sh
 npm run build:heightfield
 ```
+
+## Next.js image-to-3D app (repository root)
+
+An image-to-3D hackathon demo. Upload a PNG or JPEG, generate a Gaussian splat through TRELLIS on Hugging Face, animate a dog in the browser, and download the `.ply`.
+
+Next.js + TypeScript, Three.js + Spark, and the Gradio client. No Supabase, database, or paid inference fallback.
+
+## Run locally
+
+```sh
+npm install
+npm run dev
+```
+
+Open http://localhost:3000. The bundled dog model works without credentials.
+
+## Dog movement
+
+Press **C** to stand or sit, then use **W** to walk forward, **S** to back up, **A** to turn left, and **D** to turn right relative to the dog. Keyboard controls work without clicking the canvas first and ignore typing in form fields. Hold **W+A** or **W+D** to walk in an arc. A/D alone turn in place, and holding both cancels the turn. Brief keyboard taps produce a short step or turn. Orbiting the camera does not change the controls. You can also click the on-screen W/A/S/D buttons for a short step or turn, or hold them for continuous movement. The C and sit/stand buttons toggle the pose. Movement is blocked while sitting and throughout either pose transition. Changing focus or switching tabs releases held keys.
+
+Uploaded dogs are fitted automatically after generation. The browser estimates facing direction, body proportions, head, feet, and sitting or standing pose from the splat geometry, then attaches a procedural skeleton. A standing dog starts standing. Spark deforms the original splats on the GPU, with a walk cycle and camera follow. The bundled sample retains its hand-fitted rig.
+
+Use a clear full-body photo of one dog, standing or sitting, from the side or a three-quarter angle. This is a geometry-based hackathon prototype, not a learned animal rig or a 4D reconstruction. Missing or folded rear-leg geometry can stretch or distort during pose changes. Cropped dogs, lying poses, heavy occlusion, and non-dog subjects are outside the supported input assumptions. If fitting fails, the viewer explains why and keeps orbiting and downloading available.
+
+Download saves the original static PLY, without the runtime rig or animation. Automatic fitting runs locally in the browser and uses no additional cloud GPU or inference service. `standing_dog.ply` and `dog_model.ply` are exercised through the generated-result path in browser tests.
+
+To enable generation, create a **Read** access token at https://huggingface.co/settings/tokens and put it in an untracked `.env.local` file:
+
+```text
+HF_TOKEN=hf_your_token
+GENERATIONS_PER_HOUR=20
+```
+
+Restart the server after adding the token. Never prefix it with `NEXT_PUBLIC_` or paste it into the browser. All generation uses this account's shared ZeroGPU quota. Free accounts have limited GPU time and queue priority. Quota exhaustion stops generation; there is no Replicate fallback or automatic retry.
+
+The default local limit is 20 submission attempts per hour per process; use `0` to disable generation. Only one job can run at a time to avoid exhausting the account's quota through concurrent submissions.
+
+If the development server hits a filesystem watcher limit, use:
+
+```sh
+npm run build
+npm run start
+```
+
+## How it works
+
+- The browser accepts one PNG/JPEG up to 3 MB.
+- The backend checks the file, strips metadata, preserves transparency, and resizes it to fit within 1024 pixels. Decoded images are limited to 16 megapixels.
+- The server connects to `trellis-community/TRELLIS` with `HF_TOKEN` and creates a separate Gradio session per job.
+- In that same session, it calls `start_session`, `preprocess_image`, `generate_and_extract_glb`, then `extract_gaussian`. The current Space generates a mesh/video along the way even though this app only downloads the Gaussian file.
+- The server streams the Gaussian to a temporary disk file from the exact Space's file endpoint before closing the session. It rejects redirects, other hosts, non-Gaussian PLY headers, and files over 512 MB.
+- A signed, expiring job link is saved in browser storage. Refreshing resumes status polling without starting another generation.
+- Spark renders the downloaded splats and reuses those bytes for the download button.
+- The existing `dog_model.ply` remains an explicitly labeled sample. It never substitutes for a failed generation.
+
+## Runtime and temporary results
+
+Run this version in **one persistent Node process**, locally or on a Node server. Jobs, Gradio sessions, deduplication, and limits live in process memory; generated files use the OS temporary directory. This implementation is not suitable for Vercel/serverless or multiple server replicas. Those need a durable job store and worker.
+
+A job times out after 10 minutes including queue time. Cancellation is best effort, so a timed-out remote job may still consume quota. The app never automatically resubmits it.
+
+Up to three recent jobs are retained for at most one hour. Starting additional jobs evicts the oldest retained result. Restarting the server loses access to all jobs and results. Normal eviction removes temporary files; after an abrupt shutdown, leftover `snoopygs-*.ply` files may need manual cleanup from the OS temporary directory. Once a model has loaded into the browser, the current tab can still download it until closed or replaced. Download anything you want to keep.
+
+The original upload is not persisted across refreshes. The Hugging Face Space handles uploaded images and may have its own cache retention. Keep this shared-account hackathon demo restricted to your team; everyone using it consumes the same free quota.
+
+## Verify
+
+```sh
+npm test
+npm run typecheck
+npm run build
+npx playwright install chromium
+npx playwright test
+```
+
+Unit tests cover generation, job access, automatic fitting across export scales and headings, preservation of the native geometry, normalized skin weights, foot contact, pose transitions, and opposite A/D turns and cancellation. Browser tests render both real dog files with mocked job responses and check movement, pose controls, model switching, and refresh recovery. A real generation requires `HF_TOKEN` and available free GPU quota.
+
+Sources: [TRELLIS Space](https://huggingface.co/spaces/trellis-community/TRELLIS), [ZeroGPU quotas](https://huggingface.co/docs/hub/spaces-zerogpu), [Gradio JavaScript client](https://github.com/gradio-app/gradio/tree/main/client/js), [Spark](https://sparkjs.dev/docs/).
