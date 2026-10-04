@@ -28,8 +28,9 @@ export const BALL = {
   runAcceleration: 3, // m/s², dog
   turnSpeed: 5, // rad/s, dog
   noticeSeconds: 0.25, // pause before the dog sets off
-  pickupSeconds: 0.55,
-  mouth: { forward: 0.42 }, // pickup and drop reach, as a fraction of the dog's length
+  pickupSeconds: 0.65,
+  gripSeconds: 0.14,
+  liftSeconds: 0.45,
 };
 
 const UP = new THREE.Vector3(0, 1, 0);
@@ -37,6 +38,7 @@ const STEP = 1 / 120;
 
 export function createBall({ scene, camera, dog, input, world, onState }) {
   const { ground, unitsPerMeter: upm, ballRadius: radius } = world;
+  dog.mouthRadius = radius;
   const g = 9.8 * upm;
 
   const ball = new THREE.Mesh(
@@ -57,13 +59,14 @@ export function createBall({ scene, camera, dog, input, world, onState }) {
   const vel = new THREE.Vector3();
   const tmp = new THREE.Vector3();
   const pickupStart = new THREE.Vector3();
-  const lookTarget = new THREE.Vector3();
+  const dropTarget = new THREE.Vector3();
 
   let state = "idle";
   let stateTime = 0;
   let slowTime = 0;
   let returnPose = dog.motion.target;
   let runSpeed = 0;
+  let attached = false, gripTime = 0, releasedAt = null;
 
   function setState(next) {
     state = next;
@@ -93,10 +96,11 @@ export function createBall({ scene, camera, dog, input, world, onState }) {
     const facingOk = turnToward(azimuth, dt) || Math.abs(angleDelta(dog.facing, azimuth)) < 0.6;
     if (facingOk) {
       const remaining = Math.hypot(x - p.x, z - p.z);
-      const brakingSpeed = Math.sqrt(2 * BALL.runAcceleration * Math.max(0, remaining - stopDistance) / upm);
-      const targetSpeed = Math.min(BALL.runSpeed, Math.max(0.25, brakingSpeed));
+      const travel = remaining - stopDistance;
+      const brakingSpeed = Math.sqrt(2 * BALL.runAcceleration * Math.abs(travel) / upm);
+      const targetSpeed = Math.min(travel < 0 ? 0.4 : BALL.runSpeed, Math.max(0.15, brakingSpeed));
       runSpeed += Math.sign(targetSpeed - runSpeed) * Math.min(Math.abs(targetSpeed - runSpeed), BALL.runAcceleration * dt);
-      const stepLen = Math.min(remaining, runSpeed * upm * dt);
+      const stepLen = Math.sign(travel) * Math.min(Math.abs(travel), runSpeed * upm * dt);
       const nx = p.x + Math.sin(dog.facing) * stepLen;
       const nz = p.z + Math.cos(dog.facing) * stepLen;
       const G = groundAt(nx, nz) ?? fallbackGround;
@@ -161,15 +165,6 @@ export function createBall({ scene, camera, dog, input, world, onState }) {
     shadow.setStrength(1 - Math.min(1, height / (1.5 * upm)));
   }
 
-  function dropInFrontOfDog() {
-    dog.forward(tmp).multiplyScalar(BALL.mouth.forward * dog.length + radius * 2).add(dog.root.position);
-    const G = groundAt(tmp.x, tmp.z) ?? fallbackGround;
-    pos.set(tmp.x, G.y + radius, tmp.z);
-    vel.set(0, 0, 0);
-    shadow.setVisible(true);
-    placeShadow(G);
-  }
-
   // --- Button -----------------------------------------------------------------
   input.on("buttonpress", () => {
     if (state === "idle") {
@@ -210,6 +205,7 @@ export function createBall({ scene, camera, dog, input, world, onState }) {
 
   return {
     get state() { return state; },
+    get attached() { return attached; },
     // The dog can be petted while it's at home.
     dogAtHome: () => state === "idle" || state === "ready",
 
@@ -217,7 +213,7 @@ export function createBall({ scene, camera, dog, input, world, onState }) {
       stateTime += dt;
       if (state === "ready") dog.lookAt(camera.position);
       else if (["flying", "standing", "fetching", "collecting"].includes(state)) dog.lookAt(pos);
-      else if (state === "returning") dog.lookAt(lookTarget.copy(dog.home.ground).addScaledVector(UP, dog.height * 0.6));
+      else if (state === "dropping") dog.lookAt(dropTarget);
       else dog.lookAt(null);
       if (state === "ready") {
         // Look at whoever is holding the ball.
@@ -244,36 +240,66 @@ export function createBall({ scene, camera, dog, input, world, onState }) {
         if (dog.motion.stand === 1) setState("fetching");
       } else if (state === "fetching") {
         if (stateTime < BALL.noticeSeconds) return;
-        const reach = radius + 0.08 * dog.length;
+        const reach = dog.pickupDistance(pos);
         const done = runToward(pos.x, pos.z, dt, () => {
-          const m = mouthWorld(tmp);
-          const close = Math.hypot(m.x - pos.x, m.z - pos.z) < reach;
-          // Ball under the dog's chest: no room to reach it with the mouth.
-          const tooClose = Math.hypot(dog.root.position.x - pos.x, dog.root.position.z - pos.z)
-            < BALL.mouth.forward * dog.length;
-          return close || (tooClose && stateTime > BALL.noticeSeconds + 0.3);
-        }, BALL.mouth.forward * dog.length + reach);
+          const dx = pos.x - dog.root.position.x, dz = pos.z - dog.root.position.z;
+          return Math.abs(Math.hypot(dx, dz) - reach) < 0.004 * upm
+            && Math.abs(angleDelta(dog.facing, Math.atan2(dx, dz))) < 0.05;
+        }, reach);
         if (done) {
           pickupStart.copy(pos);
+          dog.reachMouth(pickupStart);
+          gripTime = 0;
           setState("collecting");
         }
       } else if (state === "collecting") {
-        dog.pickup = Math.min(1, stateTime / (BALL.pickupSeconds * 0.65));
-        if (stateTime >= BALL.pickupSeconds) {
-          shadow.setVisible(false);
-          setState("returning");
-        }
+        dog.pickup = Math.min(1, stateTime / BALL.pickupSeconds);
+        dog.jawOpen = attached ? 0.5 : 1;
+        if (attached) gripTime += dt;
+        if (gripTime >= BALL.gripSeconds) setState("returning");
       } else if (state === "returning") {
-        dog.pickup = Math.max(0, dog.pickup - dt / 0.25);
+        dog.jawOpen = 0.5;
+        dog.pickup = Math.max(0, dog.pickup - dt / BALL.liftSeconds);
         if (dog.pickup > 0) return;
+        dog.reachMouth(null);
         const home = dog.home.ground;
         const there = runToward(home.x, home.z, dt, () =>
           Math.hypot(dog.root.position.x - home.x, dog.root.position.z - home.z) < 0.02 * dog.length);
         if (there && turnToward(dog.home.facing, dt)) {
           dog.setPose(home, dog.home.facing, dog.home.normal);
-          dog.motion.target = returnPose;
           dog.motion.speed = dog.motion.turn = dog.motion.stride = 0;
-          dropInFrontOfDog();
+          dog.pickupPoint(dropTarget);
+          const G = groundAt(dropTarget.x, dropTarget.z) ?? fallbackGround;
+          dropTarget.y = G.y + radius + 0.07 * upm;
+          dog.reachMouth(dropTarget);
+          releasedAt = null;
+          slowTime = 0;
+          setState("dropping");
+        }
+      } else if (state === "dropping") {
+        if (releasedAt === null) {
+          dog.pickup = Math.min(1, stateTime / BALL.pickupSeconds);
+          dog.jawOpen = stateTime < BALL.pickupSeconds ? 0.5 : 1;
+          if (stateTime >= BALL.pickupSeconds + BALL.gripSeconds) {
+            attached = false;
+            releasedAt = stateTime;
+            vel.set(0, 0, 0);
+            shadow.setVisible(true);
+          }
+        } else {
+          dog.pickup = Math.max(0, 1 - (stateTime - releasedAt) / BALL.liftSeconds);
+          dog.jawOpen = stateTime - releasedAt < 0.16 ? 1 : 0;
+          for (let left = dt; left > 1e-6; left -= STEP) {
+            const step = Math.min(STEP, left);
+            const { G, onGround } = stepBall(step);
+            placeShadow(G);
+            slowTime = onGround && vel.length() < BALL.restSpeed * upm ? slowTime + step : 0;
+          }
+        }
+        if (releasedAt !== null && slowTime >= BALL.restSeconds && dog.pickup === 0) {
+          dog.reachMouth(null);
+          dog.jawOpen = 0;
+          dog.motion.target = returnPose;
           setState("idle");
         }
       }
@@ -284,12 +310,13 @@ export function createBall({ scene, camera, dog, input, world, onState }) {
       if (state === "ready") {
         camera.updateMatrixWorld();
         camera.localToWorld(pos.copy(BALL.holdMeters).multiplyScalar(upm));
-      } else if (state === "returning") {
-        mouthWorld(pos);
       } else if (state === "collecting") {
-        const t = THREE.MathUtils.smoothstep(stateTime / BALL.pickupSeconds, 0.65, 1);
-        pos.lerpVectors(pickupStart, mouthWorld(tmp), t);
+        if (!attached && mouthWorld(tmp).distanceTo(pos) < radius * 0.08) {
+          attached = true;
+          shadow.setVisible(false);
+        }
       }
+      if (attached) mouthWorld(pos);
     },
   };
 }

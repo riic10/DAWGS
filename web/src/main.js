@@ -175,7 +175,7 @@ async function main() {
   interactions = {
     dog,
     ball,
-    pet: createPet(dog, input, ball.dogAtHome, camera),
+    pet: createPet(dog, input, ball.dogAtHome, camera.position),
     cameraStick: createCameraStick(input, camera, controls, setup.view),
     cameraDistance: createCameraDistance(input, camera, controls),
   };

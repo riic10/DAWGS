@@ -2,7 +2,11 @@ import { Matrix4, Quaternion, Vector3 } from "three";
 import type { DogMotion } from "./dog-motion";
 
 export type Segment = { start: Vector3; end: Vector3 };
-export type DogAttention = { target?: Vector3 | null; pickup?: number; pet?: number; petPhase?: number };
+export type DogAttention = {
+  target?: Vector3 | null; pickup?: number;
+  pet?: number; petPhase?: number; petTarget?: Vector3 | null;
+  mouthTarget?: Vector3 | null; mouthRadius?: number; jawOpen?: number;
+};
 export type GroundHeight = (point: Vector3) => number | undefined;
 const point = (x: number, y: number, z = 0) => new Vector3(x, y, z);
 const clamp = (x: number, a: number, b: number) => Math.max(a, Math.min(b, x));
@@ -12,9 +16,11 @@ export const smooth = (a: number, b: number, x: number) => {
 };
 const X = point(1, 0), Y = point(0, 1), Z = point(0, 0, 1);
 const FLOOR = 0.405;
+const STAND_SHIFT = point(-0.10, 0.045), PICKUP_SHIFT = point(-0.04, 0.10);
 export const LEG_BASES = [4, 7, 10, 13] as const;
 export const SHOULDERS = [16, 17] as const;
 export const PELVIS = 18;
+export const JAW = 19;
 
 // Lateral walking footfalls blend into diagonal trotting pairs as speed increases.
 const WALK_OFFSETS = [0, 0.25, 0.5, 0.75];
@@ -43,6 +49,7 @@ function sampleDogRest(): Segment[] {
     rest.push({ start: point(-0.07, -0.04, side * 0.105), end: point(-0.15, 0.04, side * 0.105) });
   }
   rest.push({ start: point(0.24, 0.23), end: point(0.31, 0.24) });
+  rest.push({ start: point(-0.26, -0.20), end: point(-0.405, -0.208) });
   return rest;
 }
 
@@ -71,6 +78,9 @@ export function createSampleDogPose() {
   const inverse = new Matrix4(), translation = new Matrix4(), identity = new Matrix4();
   const from = new Vector3(), to = new Vector3(), unit = point(1, 1, 1);
   const bodyRotation = new Quaternion(), headLocalRotation = new Quaternion();
+  const aimRotation = new Quaternion(), reachJoint = new Vector3(), reachEnd = new Vector3();
+  const mouthRest = point(-0.405, -0.212), pickupGround = point(-0.60, FLOOR);
+  const pickupChest = rest[0].start.clone().add(STAND_SHIFT).add(PICKUP_SHIFT);
   const mouth = new Vector3();
   const feet = LEG_BASES.map((base, i) => ({
     base, rear: i % 2 === 1, offset: WALK_OFFSETS[i], correction: 0, cycle: 0, swing: 0,
@@ -81,6 +91,7 @@ export function createSampleDogPose() {
   }));
   let phase = 0.32, trot = 0, activity = 0, yaw = 0, pitch = 0, previousStand = 0, previousTarget = 0;
   let previousMoving = false;
+  let petSide = 1, jawAngle = 0;
 
   function transformBone(i: number) {
     matrices[i].compose(posed[i].start, rotations[i], unit)
@@ -88,9 +99,15 @@ export function createSampleDogPose() {
   }
 
   return {
-    rest, posed, matrices, feet, mouth,
+    rest, posed, matrices, feet, mouth, pickupGround,
     get gaze() { return { yaw, pitch }; },
     get gait() { return { phase, trot, activity }; },
+    pickupApproach(target: Vector3, result = new Vector3()) {
+      // Leave neck extension available when the ball and paws rest at different ground heights.
+      const reach = 0.94 * (rest[1].start.distanceTo(rest[1].end) + rest[2].start.distanceTo(mouthRest));
+      const forward = Math.sqrt(Math.max(0.08 ** 2, reach ** 2 - (target.y - pickupChest.y) ** 2 - target.z ** 2));
+      return result.set(pickupChest.x - forward, target.y, target.z);
+    },
     update(motion: DogMotion, dt = 1 / 60, world = identity,
       attention: DogAttention = {}, groundHeight?: GroundHeight) {
       dt = clamp(dt, 0, 0.1);
@@ -119,15 +136,25 @@ export function createSampleDogPose() {
       const gait = activity * stand * (1 - pickup);
       const beat = phase * Math.PI * 2;
       const pet = clamp(attention.pet ?? 0, 0, 1) * (1 - pickup) * (1 - activity);
-      const bodyAngle = Math.atan2(0.25, 0.38) * (1 - rise) + 0.17 * rise - 0.33 * pickup
+      let petYaw = 0.3;
+      if (attention.petTarget) {
+        to.copy(attention.petTarget).applyMatrix4(inverse).sub(posed[1].end);
+        petYaw = clamp(Math.atan2(to.z, -to.x), -0.5, 0.5);
+      }
+      petSide += ((petYaw < 0 ? -1 : 1) - petSide) * (1 - Math.exp(-dt * 6));
+      const petPhase = attention.petPhase ?? 0;
+      const nuzzle = (1 - Math.cos(petPhase * 0.5)) * 0.5;
+      const neckLean = pet * (0.30 + 0.16 * nuzzle);
+      const bodyAngle = Math.atan2(0.25, 0.38) * (1 - rise) + 0.17 * rise - 0.12 * pickup
         + 0.009 * gait * Math.sin(beat * 2);
       bodyRotation.setFromAxisAngle(Z, bodyAngle - Math.atan2(0.25, 0.38));
-      posed[0].start.set(-0.14 - 0.10 * stand - 0.015 * Math.sin(stand * Math.PI),
-        -0.02 + 0.045 * stand + 0.16 * pickup + gait * (0.008 + (0.002 + 0.003 * trot) * Math.cos(beat * 2 - stance * Math.PI * 2)), 0);
+      posed[0].start.copy(rest[0].start).addScaledVector(STAND_SHIFT, stand).addScaledVector(PICKUP_SHIFT, pickup);
+      posed[0].start.x -= 0.015 * Math.sin(stand * Math.PI);
+      posed[0].start.y += gait * (0.008 + (0.002 + 0.003 * trot) * Math.cos(beat * 2 - stance * Math.PI * 2));
       posed[0].end.copy(rest[0].end).sub(rest[0].start).applyQuaternion(bodyRotation).add(posed[0].start);
       // Pivot the chest around the hips so a seated pet response keeps its weight on the ground.
-      bodyRotation.premultiply(headLocalRotation.setFromAxisAngle(X, -0.02 * pet))
-        .premultiply(headLocalRotation.setFromAxisAngle(Y, 0.035 * pet));
+      bodyRotation.premultiply(headLocalRotation.setFromAxisAngle(X, -0.02 * pet * petSide))
+        .premultiply(headLocalRotation.setFromAxisAngle(Y, 0.035 * pet * petSide));
       posed[0].start.copy(rest[0].start).sub(rest[0].end).applyQuaternion(bodyRotation).add(posed[0].end);
       rotations[0].copy(bodyRotation);
       transformBone(0);
@@ -146,28 +173,48 @@ export function createSampleDogPose() {
         targetYaw = clamp(Math.atan2(to.z, -to.x), -1.15, 1.15);
         targetPitch = clamp(Math.atan2(to.y, Math.hypot(to.x, to.z)), -0.45, 0.9);
       }
-      targetYaw += (0.18 - targetYaw) * pet;
-      targetPitch += (-0.18 - targetPitch) * pet;
+      targetYaw += (petYaw - targetYaw) * pet;
+      targetPitch += (-0.32 - 0.03 * nuzzle - targetPitch) * pet;
       targetPitch += (1.45 - targetPitch) * pickup;
       const follow = 1 - Math.exp(-dt * 10);
       yaw += (targetYaw - yaw) * follow;
       pitch += (targetPitch - pitch) * follow;
       rotations[1].setFromAxisAngle(Y, yaw * 0.4)
-        .multiply(headLocalRotation.setFromAxisAngle(Z, -pitch * 0.6));
+        .multiply(headLocalRotation.setFromAxisAngle(Z, -pitch * 0.6 - neckLean));
       posed[1].start.copy(posed[0].start);
       posed[1].end.copy(rest[1].end).sub(rest[1].start).applyQuaternion(rotations[1]).add(posed[1].start);
       rotations[2].copy(rotations[1]).multiply(headLocalRotation.setFromAxisAngle(Y, yaw * 0.6))
-        .multiply(headLocalRotation.setFromAxisAngle(Z, -pitch * 0.4))
-        .multiply(headLocalRotation.setFromAxisAngle(X, -0.12 * pet));
+        .multiply(headLocalRotation.setFromAxisAngle(Z, -pitch * 0.4 + neckLean))
+        .multiply(headLocalRotation.setFromAxisAngle(X, -(0.24 + 0.04 * nuzzle) * pet * petSide));
+      const radius = Math.max(0, attention.mouthRadius ?? 0) / scale;
+      mouthRest.set(-0.405 - radius * 0.45, -0.212 + radius * 0.28, 0);
+      if (attention.mouthTarget && pickup > 0) {
+        // Reach the grounded ball with fixed neck and skull lengths before attaching it.
+        to.copy(attention.mouthTarget).applyMatrix4(inverse);
+        solveLimb(posed[1].start, to, rest[1].start.distanceTo(rest[1].end),
+          rest[2].start.distanceTo(mouthRest), point(0, -1), reachJoint, reachEnd);
+        aimRotation.setFromUnitVectors(from.subVectors(rest[1].end, rest[1].start).normalize(),
+          to.subVectors(reachJoint, posed[1].start).normalize());
+        rotations[1].slerp(aimRotation, pickup);
+        aimRotation.setFromUnitVectors(from.subVectors(mouthRest, rest[2].start).normalize(),
+          to.subVectors(reachEnd, reachJoint).normalize());
+        rotations[2].slerp(aimRotation, pickup);
+        posed[1].end.copy(rest[1].end).sub(rest[1].start).applyQuaternion(rotations[1]).add(posed[1].start);
+      }
       posed[2].start.copy(posed[1].end);
       posed[2].end.copy(rest[2].end).sub(rest[2].start).applyQuaternion(rotations[2]).add(posed[2].start);
       transformBone(1); transformBone(2);
-      mouth.set(-0.31, -0.17, 0).applyMatrix4(matrices[2]);
+      mouth.copy(mouthRest).applyMatrix4(matrices[2]);
+      jawAngle += (clamp(attention.jawOpen ?? 0, 0, 1) * 0.45 - jawAngle) * (1 - Math.exp(-dt * 18));
+      posed[JAW].start.copy(rest[JAW].start).applyMatrix4(matrices[2]);
+      rotations[JAW].copy(rotations[2]).multiply(headLocalRotation.setFromAxisAngle(Z, -jawAngle));
+      posed[JAW].end.copy(rest[JAW].end).sub(rest[JAW].start).applyQuaternion(rotations[JAW]).add(posed[JAW].start);
+      transformBone(JAW);
 
       posed[3].start.copy(rest[3].start).applyMatrix4(matrices[PELVIS]);
       rotations[3].copy(rotations[PELVIS])
-        .multiply(headLocalRotation.setFromAxisAngle(Z, -0.25 * pet))
-        .multiply(headLocalRotation.setFromAxisAngle(X, Math.sin(attention.petPhase ?? 0) * 0.4 * pet + 0.08 * gait * Math.sin(beat)));
+        .multiply(headLocalRotation.setFromAxisAngle(Z, -0.55 * pet))
+        .multiply(headLocalRotation.setFromAxisAngle(X, Math.sin(petPhase) * 0.6 * pet + 0.08 * gait * Math.sin(beat)));
       posed[3].end.copy(rest[3].end).sub(rest[3].start).applyQuaternion(rotations[3]).add(posed[3].start);
       transformBone(3);
 

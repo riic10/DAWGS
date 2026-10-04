@@ -1,5 +1,21 @@
 import { expect, test } from "@playwright/test";
 
+test.afterEach(async ({ page }, testInfo) => {
+  if (testInfo.status === testInfo.expectedStatus) return;
+  const state = await page.evaluate(() => {
+    if (!window.snoopy) return null;
+    const { dog, ball, scene } = window.snoopy;
+    const sphere = scene.children.find(object => object.geometry?.type === "SphereGeometry");
+    return {
+      state: ball.state, pickup: dog.pickup, attached: ball.attached,
+      root: dog.root.position.toArray(), normal: dog.groundNormal.toArray(),
+      target: sphere.position.clone().applyMatrix4(dog.splats.matrixWorld.clone().invert()).toArray(),
+      mouth: dog.joints.mouth.toArray(), chest: dog.joints.posed[1].start.toArray(),
+    };
+  });
+  await testInfo.attach("fetch-state", { body: JSON.stringify(state), contentType: "application/json" });
+});
+
 for (const scene of ["office", "woods"]) {
   test(`${scene}: the dog stands, animates the fetch, and sits after returning`, async ({ page }, testInfo) => {
     const errors = [];
@@ -24,6 +40,9 @@ for (const scene of ["office", "woods"]) {
           contacts: joints.feet.filter(foot => foot.planted).map(foot => foot.base),
           mouthHeight: mouth.y - dog.root.position.y,
           carryError: carried?.position.distanceTo(mouth),
+          attached: ball.attached,
+          ballPosition: carried?.position.toArray(),
+          ballRadius: state.setup.ballRadius,
           pitch: joints.gaze.pitch,
           trot: joints.gait.trot,
         });
@@ -70,13 +89,25 @@ for (const scene of ["office", "woods"]) {
     expect(movingFrames.length).toBeGreaterThan(2);
     expect(movingFrames.every(frame => frame.stand === 1)).toBe(true);
     expect(frames.some(frame => frame.state === "returning")).toBe(true);
+    expect(frames.some(frame => frame.state === "dropping")).toBe(true);
     expect(Math.max(...frames.map(frame => frame.boneError))).toBeLessThan(1e-8);
     expect(frames.some(frame => frame.state === "collecting" && frame.pitch > 1)).toBe(true);
     const pickupHeight = Math.min(...frames.filter(frame => frame.state === "collecting").map(frame => frame.mouthHeight));
     const runningHeight = Math.max(...movingFrames.map(frame => frame.mouthHeight));
     expect(pickupHeight).toBeLessThan(runningHeight * 0.7);
     expect(frames.filter(frame => frame.state === "returning").every(frame => frame.carryError < 1e-8)).toBe(true);
-    expect(Math.max(...movingFrames.map(frame => frame.footError))).toBeLessThan(1e-7);
+    const collection = frames.filter(frame => frame.state === "collecting");
+    const grounded = collection[0].ballPosition;
+    const distance = (a, b) => Math.hypot(...a.map((v, i) => v - b[i]));
+    expect(collection.filter(frame => !frame.attached).every(frame => distance(frame.ballPosition, grounded) < 1e-8)).toBe(true);
+    const firstGrip = collection.find(frame => frame.attached);
+    expect(firstGrip).toBeTruthy();
+    expect(distance(firstGrip.ballPosition, grounded)).toBeLessThan(firstGrip.ballRadius * 0.08);
+    const releaseIndex = frames.findIndex((frame, i) => i > 0 && frame.state === "dropping" && !frame.attached && frames[i - 1].attached);
+    expect(releaseIndex).toBeGreaterThan(0);
+    expect(distance(frames[releaseIndex].ballPosition, frames[releaseIndex - 1].ballPosition)).toBeLessThan(1e-8);
+    const standingFramesWithContacts = frames.filter(frame => frame.stand === 1);
+    expect(Math.max(...standingFramesWithContacts.map(frame => frame.footError))).toBeLessThan(1e-7);
     expect(new Set(movingFrames.flatMap(frame => frame.contacts)).size).toBe(4);
     expect(movingFrames.reduce((sum, frame) => sum + frame.contacts.length, 0) / movingFrames.length).toBeGreaterThan(1);
     const end = await page.evaluate(() => ({ x: window.snoopy.dog.root.position.x, z: window.snoopy.dog.root.position.z }));
@@ -119,6 +150,10 @@ test("Arduino petting moves the head and tail with grounded paws, and camera dis
     const current = window.snoopy.dog.joints.posed[3].end.toArray();
     return Math.hypot(...current.map((v, i) => v - tail[i]));
   }, touched.tail)).toBeGreaterThan(0.02);
+  await expect.poll(() => page.evaluate(head => {
+    const current = window.snoopy.dog.joints.posed[2].end.toArray();
+    return Math.hypot(...current.map((v, i) => v - head[i]));
+  }, touched.head)).toBeGreaterThan(0.006);
   await expect.poll(() => page.evaluate(() => window.snoopy.camera.position.distanceTo(window.snoopy.controls.target))).toBeLessThan(before.distance - 1);
   await page.evaluate(() => window.snoopy.arduino.feedLine("0,0,0"));
   await page.waitForFunction(() => window.snoopy.dog.anim.pet === 0);

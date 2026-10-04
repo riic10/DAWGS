@@ -27,8 +27,10 @@ export async function loadDog(scene, { ground, normal = UP, facing, height, unit
   const noKeys = new Set();
   const previousPosition = ground.clone();
   let previousFacing = facing;
-  const attention = { target: null, pickup: 0, pet: 0, petPhase: 0 };
+  const attention = { target: null, pickup: 0, pet: 0, petPhase: 0, petTarget: null, mouthTarget: null, mouthRadius: 0, jawOpen: 0 };
   const lookTarget = new THREE.Vector3();
+  const mouthTarget = new THREE.Vector3(), pickupPoint = new THREE.Vector3(), forward = new THREE.Vector3();
+  const localBall = new THREE.Vector3(), inverseWorld = new THREE.Matrix4();
   const localUp = new THREE.Vector3();
   const terrainTilt = new THREE.Quaternion();
   const targetTilt = new THREE.Quaternion();
@@ -57,10 +59,11 @@ export async function loadDog(scene, { ground, normal = UP, facing, height, unit
   const dog = {
     root, body, splats, height, length, width, motion, joints: rig.pose,
     pickup: 0,
+    mouthRadius: 0, jawOpen: 0,
     home: { ground: ground.clone(), normal: normal.clone(), facing },
     facing,
     groundNormal: normal.clone(),
-    anim: { pet: 0, petPhase: 0 },
+    anim: { pet: 0, petPhase: 0, petTarget: null },
 
     setPose(point, newFacing = dog.facing, groundNormal = dog.groundNormal) {
       dog.facing = newFacing;
@@ -81,6 +84,22 @@ export async function loadDog(scene, { ground, normal = UP, facing, height, unit
     mouthWorld(target = new THREE.Vector3()) {
       splats.updateWorldMatrix(true, false);
       return target.copy(rig.pose.mouth).applyMatrix4(splats.matrixWorld);
+    },
+
+    reachMouth(point) {
+      attention.mouthTarget = point ? mouthTarget.copy(point) : null;
+    },
+
+    pickupPoint(target = new THREE.Vector3()) {
+      splats.updateWorldMatrix(true, false);
+      return target.copy(rig.pose.pickupGround).applyMatrix4(splats.matrixWorld);
+    },
+
+    pickupDistance(point) {
+      splats.updateWorldMatrix(true, false);
+      localBall.copy(point).applyMatrix4(inverseWorld.copy(splats.matrixWorld).invert());
+      return rig.pose.pickupApproach(localBall, pickupPoint).applyMatrix4(splats.matrixWorld)
+        .sub(root.position).dot(dog.forward(forward));
     },
 
     prepareFrame(dt) {
@@ -104,8 +123,11 @@ export async function loadDog(scene, { ground, normal = UP, facing, height, unit
       terrainTilt.slerp(targetTilt, 1 - Math.exp(-dt * 10));
       body.quaternion.copy(terrainTilt);
       attention.pickup = dog.pickup;
+      attention.mouthRadius = dog.mouthRadius;
+      attention.jawOpen = dog.jawOpen;
       attention.pet = dog.anim.pet;
       attention.petPhase = dog.anim.petPhase;
+      attention.petTarget = dog.anim.petTarget;
       rig.update(motion, dt, attention);
       shadow.place(root.position, dog.groundNormal);
     },

@@ -99,7 +99,7 @@ test("fast fetches retain paw contacts when a frame crosses touchdown or skips a
 
 test("head and neck share a bounded look direction and the mouth follows the head", () => {
   const pose = createSampleDogPose(), motion = createDogMotion(), world = new Matrix4();
-  const restMouth = new Vector3(-0.31, -0.17, 0);
+  const restMouth = new Vector3(-0.405, -0.212, 0);
   for (const target of [new Vector3(-2, -1, 3), new Vector3(3, 1, -4)]) {
     for (let frame = 0; frame < 120; frame++) pose.update(motion, 1 / 60, world, { target });
     assert.ok(Math.abs(pose.gaze.yaw) <= 1.15);
@@ -110,6 +110,46 @@ test("head and neck share a bounded look direction and the mouth follows the hea
   }
   for (let frame = 0; frame < 120; frame++) pose.update(motion);
   assert.ok(Math.abs(pose.gaze.yaw) < 1e-7 && Math.abs(pose.gaze.pitch) < 1e-7);
+});
+
+test("pickup reaches a grounded ball through the neck and head at different world scales", () => {
+  for (const scale of [0.75, 3]) {
+    const pose = createSampleDogPose(), motion = createDogMotion();
+    motion.stand = motion.target = 1;
+    const world = new Matrix4().makeRotationY(0.8).multiply(new Matrix4().makeRotationX(Math.PI))
+      .scale(new Vector3(scale, scale, scale)).setPosition(2, 0.405 * scale, -4);
+    const radius = 0.074 * scale;
+    const target = new Vector3(-0.60, 0.405 - radius / scale, 0).applyMatrix4(world);
+    for (let frame = 0; frame < 90; frame++) {
+      pose.update(motion, 1 / 60, world, { pickup: Math.min(1, frame / 45), mouthTarget: target, mouthRadius: radius });
+      checkSkeleton(pose);
+    }
+    assert.ok(pose.mouth.clone().applyMatrix4(world).distanceTo(target) < 1e-7,
+      "the mouth must reach the ball before the ball attaches");
+    pose.feet.forEach(foot => assert.ok(pose.posed[foot.base + 2].end.clone().applyMatrix4(world).distanceTo(foot.anchor) < 1e-7));
+  }
+});
+
+test("pickup preserves planted paws when the preceding stride stops at different phases", () => {
+  for (let stop = 0; stop < 24; stop++) {
+    const pose = createSampleDogPose(), motion = createDogMotion(), world = new Matrix4();
+    motion.stand = motion.target = 1;
+    motion.speed = 1.5;
+    for (let frame = 0; frame < 180 + stop; frame++) {
+      world.makeTranslation(-frame * 0.025, 0, 0);
+      pose.update(motion, 1 / 60, world);
+    }
+    motion.speed = 0;
+    const target = new Vector3(-0.60, 0.331, 0).applyMatrix4(world);
+    for (let frame = 0; frame < 90; frame++) {
+      pose.update(motion, 1 / 60, world, { pickup: Math.min(1, frame / 39), mouthTarget: target, mouthRadius: 0.074 });
+      checkSkeleton(pose);
+      for (const foot of pose.feet.filter(foot => foot.planted)) {
+        assert.ok(pose.posed[foot.base + 2].end.clone().applyMatrix4(world).distanceTo(foot.anchor) < 1e-7,
+          `paw ${foot.base} slipped during pickup after stop ${stop}`);
+      }
+    }
+  }
 });
 
 test("changing from a pivot to a run releases a paw before the limb overextends", () => {
@@ -185,6 +225,24 @@ test("petting holds the hips and paws in place while the neck leans and the tail
     assert.ok(Math.max(...tailPositions) - Math.min(...tailPositions) > 0.1);
     for (let frame = 0; frame < 120; frame++) pose.update(motion);
     assert.ok(pose.posed[2].end.distanceTo(head) < 1e-8);
+  }
+});
+
+test("held petting faces the viewer and keeps a slow neck response after the initial lean", () => {
+  for (const side of [-1, 1]) {
+    const pose = createSampleDogPose(), motion = createDogMotion(), world = new Matrix4();
+    const heads: Vector3[] = [];
+    for (let frame = 0; frame < 360; frame++) {
+      pose.update(motion, 1 / 60, world, {
+        pet: 1, petPhase: frame / 60 * Math.PI * 2 * 1.35,
+        petTarget: new Vector3(-1, -0.5, side),
+      });
+      checkSkeleton(pose);
+      if (frame > 180) heads.push(pose.posed[2].end.clone());
+    }
+    assert.ok(pose.gaze.yaw * side > 0.2, "the head should turn toward the viewer's side");
+    assert.ok(Math.max(...heads.map(head => head.distanceTo(heads[0]))) > 0.01,
+      "holding touch should retain a visible, slow neck response");
   }
 });
 
