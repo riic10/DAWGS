@@ -3,8 +3,12 @@ const GAME_TEXT = {
   idle: "ball: press button to get it ready",
   ready: "ball: ready, press again to throw",
   flying: "ball: thrown",
+  standing: "dog: standing up",
+  collecting: "dog: picking up ball",
   fetching: "dog: fetching",
-  returning: "dog: bringing it back",
+  returning: "dog: bringing you the ball",
+  dropping: "dog: putting the ball down",
+  deliveryBlocked: "dog: waiting for a clear place to bring the ball",
 };
 
 export function createHud(input) {

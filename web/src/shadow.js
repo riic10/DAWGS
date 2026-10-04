@@ -79,5 +79,14 @@ export function createShadow(scene, cfg, radius, defaultLift) {
       object.scale.setScalar(sizeFactor * (0.6 + 0.4 * strength));
     },
     setVisible(v) { object.visible = v; },
+    dispose() {
+      object.removeFromParent();
+      if (cfg.kind === "splat") object.dispose();
+      else {
+        object.geometry.dispose();
+        object.material.map.dispose();
+        object.material.dispose();
+      }
+    },
   };
 }

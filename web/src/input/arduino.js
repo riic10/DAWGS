@@ -254,7 +254,7 @@ export function createArduinoInput() {
       setStick(name, x, y, state[name].pressed);
     }
   }
-  const typing = (e) => e.target instanceof HTMLElement && e.target.matches("input, textarea, [contenteditable]");
+  const typing = (e) => e.target instanceof HTMLElement && (e.target.isContentEditable || e.target.closest("input, select, textarea"));
   window.addEventListener("keydown", (e) => {
     if (e.repeat || e.metaKey || e.ctrlKey || e.altKey || typing(e)) return;
     const key = e.key.toLowerCase();
@@ -287,7 +287,11 @@ export function createArduinoInput() {
   return {
     state,
     supported: Boolean(navigator.serial),
-    on: (type, fn) => events.addEventListener(type, (e) => fn(e.detail)),
+    on: (type, fn) => {
+      const listener = e => fn(e.detail);
+      events.addEventListener(type, listener);
+      return () => events.removeEventListener(type, listener);
+    },
     feedLine,
     connect,
     calibrate, // re-measure the sticks' resting values from the next samples
