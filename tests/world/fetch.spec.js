@@ -25,6 +25,7 @@ for (const scene of ["office", "woods"]) {
           mouthHeight: mouth.y - dog.root.position.y,
           carryError: carried?.position.distanceTo(mouth),
           pitch: joints.gaze.pitch,
+          trot: joints.gait.trot,
         });
       });
     });
@@ -85,19 +86,44 @@ for (const scene of ["office", "woods"]) {
   });
 }
 
-test("Arduino petting and camera distance still work without manual dog controls", async ({ page }) => {
+test("Arduino petting moves the head and tail with grounded paws, and camera distance still works", async ({ page }) => {
   await page.goto("/?scene=office");
   await page.waitForFunction(() => Boolean(window.snoopy));
   const before = await page.evaluate(() => ({
     distance: window.snoopy.camera.position.distanceTo(window.snoopy.controls.target),
     position: window.snoopy.dog.root.position.toArray(),
+    body: window.snoopy.dog.body.matrix.toArray(),
+    head: window.snoopy.dog.joints.posed[2].end.toArray(),
   }));
   await page.keyboard.type("wasdc");
   expect(await page.evaluate(() => window.snoopy.dog.root.position.toArray())).toEqual(before.position);
   expect(await page.evaluate(() => window.snoopy.dog.motion.target)).toBe(0);
   await page.evaluate(() => window.snoopy.arduino.feedLine("1,0,20"));
-  await page.waitForFunction(() => Math.abs(window.snoopy.dog.anim.petRoll) > 0.03);
+  await page.waitForFunction(() => window.snoopy.dog.anim.pet > 0.98);
+  const touched = await page.evaluate(() => {
+    const { dog } = window.snoopy;
+    return {
+      position: dog.root.position.toArray(), body: dog.body.matrix.toArray(),
+      head: dog.joints.posed[2].end.toArray(), tail: dog.joints.posed[3].end.toArray(),
+      feet: dog.joints.feet.map(foot => ({
+        planted: foot.planted,
+        error: dog.joints.posed[foot.base + 2].end.clone().applyMatrix4(dog.splats.matrixWorld).distanceTo(foot.anchor),
+      })),
+    };
+  });
+  expect(touched.position).toEqual(before.position);
+  expect(touched.body).toEqual(before.body);
+  expect(Math.hypot(...touched.head.map((v, i) => v - before.head[i]))).toBeGreaterThan(0.02);
+  expect(touched.feet.every(foot => foot.planted && foot.error < 1e-7)).toBe(true);
+  await expect.poll(() => page.evaluate(tail => {
+    const current = window.snoopy.dog.joints.posed[3].end.toArray();
+    return Math.hypot(...current.map((v, i) => v - tail[i]));
+  }, touched.tail)).toBeGreaterThan(0.02);
   await expect.poll(() => page.evaluate(() => window.snoopy.camera.position.distanceTo(window.snoopy.controls.target))).toBeLessThan(before.distance - 1);
   await page.evaluate(() => window.snoopy.arduino.feedLine("0,0,0"));
-  await page.waitForFunction(() => window.snoopy.dog.anim.petRoll === 0);
+  await page.waitForFunction(() => window.snoopy.dog.anim.pet === 0);
+  await expect.poll(() => page.evaluate(head => {
+    const current = window.snoopy.dog.joints.posed[2].end.toArray();
+    return Math.hypot(...current.map((v, i) => v - head[i]));
+  }, before.head)).toBeLessThan(0.001);
 });

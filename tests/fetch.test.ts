@@ -81,8 +81,12 @@ test("a sitting dog finishes standing before fetch movement and sits again on re
   let moved = false;
   let collectingAt: Vector3 | undefined;
   let crouched = false;
+  const outboundSpeeds: number[] = [];
   for (let frame = 0; frame < 1800 && ball.state !== "idle"; frame++) {
+    const position = dog.root.position.clone();
     tick();
+    const speed = dog.root.position.distanceTo(position) * 60 / 2;
+    if (ball.state === "fetching" && speed > 1e-6) outboundSpeeds.push(speed);
     if (ball.state === "collecting") {
       collectingAt ??= dog.root.position.clone();
       assert.ok(dog.root.position.equals(collectingAt));
@@ -96,6 +100,9 @@ test("a sitting dog finishes standing before fetch movement and sits again on re
   assert.equal(ball.state, "idle");
   assert.ok(moved);
   assert.ok(crouched);
+  assert.ok(outboundSpeeds[0] < 0.1);
+  assert.ok(Math.max(...outboundSpeeds) > 1.25);
+  assert.ok(outboundSpeeds.at(-1)! < 0.65);
   assert.equal(dog.pickup, 0);
   assert.deepEqual(states, ["ready", "flying", "standing", "fetching", "collecting", "returning", "idle"]);
   assert.ok(dog.root.position.equals(dog.home.ground));

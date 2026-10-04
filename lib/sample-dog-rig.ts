@@ -1,7 +1,7 @@
 import { Matrix4, Vector3, Vector4 } from "three";
 import { SplatSkinning, SplatSkinningMode, type SplatMesh } from "@sparkjsdev/spark";
 import type { DogMotion } from "./dog-motion";
-import { createSampleDogPose, LEG_BASES, smooth, type DogAttention, type GroundHeight, type Segment } from "./sample-dog-pose";
+import { createSampleDogPose, LEG_BASES, PELVIS, SHOULDERS, smooth, type DogAttention, type GroundHeight, type Segment } from "./sample-dog-pose";
 
 export function createSampleDogRig(mesh: SplatMesh, groundHeight?: GroundHeight) {
   const pose = createSampleDogPose();
@@ -25,7 +25,14 @@ export function createSampleDogRig(mesh: SplatMesh, groundHeight?: GroundHeight)
     const front = (1 - smooth(-0.19, -0.105, p.x)) * smooth(0.055, 0.17, p.y);
     const rear = smooth(-0.005, 0.09, p.x) * smooth(0.16, 0.29, p.y) * (1 - tail);
     const side = smooth(-0.035, 0.035, p.z);
-    const scores: [number, number][] = [[0, Math.max(0.001, (1 - head - neck) * (1 - front) * (1 - rear) * (1 - tail))], [1, neck], [2, head], [3, tail]];
+    const torso = Math.max(0.001, (1 - head - neck) * (1 - front) * (1 - rear) * (1 - tail));
+    const shoulder = (1 - smooth(-0.075, 0.05, p.x)) * smooth(-0.10, -0.03, p.y) * (1 - smooth(0.06, 0.12, p.y));
+    const pelvis = smooth(0.08, 0.24, p.x) * smooth(0.10, 0.20, p.y);
+    const scores: [number, number][] = [
+      [0, torso * (1 - shoulder) * (1 - pelvis)], [1, neck], [2, head], [3, tail],
+      [SHOULDERS[0], torso * shoulder * (1 - side)], [SHOULDERS[1], torso * shoulder * side],
+      [PELVIS, torso * (1 - shoulder) * pelvis],
+    ];
     for (let s = 0; s < 2; s++) {
       for (const [start, strength] of [[LEG_BASES[s * 2], front], [LEG_BASES[s * 2 + 1], rear]]) {
         const values = Array.from({ length: 3 }, (_, k) => 1 / (0.0006 + distance(p, rest[start + k])) ** 2);

@@ -13,8 +13,8 @@ const DOG = {
 
 const UP = new THREE.Vector3(0, 1, 0);
 
-// Loads the dog as root (position on the ground, yaw) -> body (animation
-// offsets) -> splats (flip, scale, centring). The bottom centre of the dog
+// Loads the dog as root (position on the ground, yaw) -> body (terrain
+// alignment) -> splats (flip, scale, centring). The bottom centre of the dog
 // sits at root's origin, and root's local -X is the way the dog faces.
 //
 // Facing is an azimuth in radians from +Z toward +X, the same convention as
@@ -27,7 +27,7 @@ export async function loadDog(scene, { ground, normal = UP, facing, height, unit
   const noKeys = new Set();
   const previousPosition = ground.clone();
   let previousFacing = facing;
-  const attention = { target: null, pickup: 0 };
+  const attention = { target: null, pickup: 0, pet: 0, petPhase: 0 };
   const lookTarget = new THREE.Vector3();
   const localUp = new THREE.Vector3();
   const terrainTilt = new THREE.Quaternion();
@@ -60,8 +60,7 @@ export async function loadDog(scene, { ground, normal = UP, facing, height, unit
     home: { ground: ground.clone(), normal: normal.clone(), facing },
     facing,
     groundNormal: normal.clone(),
-    // Offsets from the animation modules, summed in update().
-    anim: { petHop: 0, petRoll: 0, petYaw: 0 },
+    anim: { pet: 0, petPhase: 0 },
 
     setPose(point, newFacing = dog.facing, groundNormal = dog.groundNormal) {
       dog.facing = newFacing;
@@ -100,17 +99,15 @@ export async function loadDog(scene, { ground, normal = UP, facing, height, unit
       }
       previousPosition.copy(root.position);
       previousFacing = dog.facing;
-      const { petHop: hop, petRoll, petYaw } = dog.anim;
-      body.position.y = hop;
-      body.rotation.set(petRoll, petYaw, 0);
       localUp.copy(dog.groundNormal).applyAxisAngle(UP, -root.rotation.y);
       targetTilt.setFromUnitVectors(UP, localUp);
       terrainTilt.slerp(targetTilt, 1 - Math.exp(-dt * 10));
-      body.quaternion.premultiply(terrainTilt);
+      body.quaternion.copy(terrainTilt);
       attention.pickup = dog.pickup;
+      attention.pet = dog.anim.pet;
+      attention.petPhase = dog.anim.petPhase;
       rig.update(motion, dt, attention);
       shadow.place(root.position, dog.groundNormal);
-      shadow.setStrength(1 - Math.min(1, hop / (height * 0.3)) * 0.5);
     },
   };
   dog.setPose(ground, facing, normal);

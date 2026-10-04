@@ -25,6 +25,7 @@ export const BALL = {
   maxFlightSeconds: 6,
   blockHeightMeters: 2.5, // blocked cells (trees, rocks) stop the ball below this height
   runSpeed: 1.5, // m/s, dog
+  runAcceleration: 3, // m/s², dog
   turnSpeed: 5, // rad/s, dog
   noticeSeconds: 0.25, // pause before the dog sets off
   pickupSeconds: 0.55,
@@ -62,10 +63,12 @@ export function createBall({ scene, camera, dog, input, world, onState }) {
   let stateTime = 0;
   let slowTime = 0;
   let returnPose = dog.motion.target;
+  let runSpeed = 0;
 
   function setState(next) {
     state = next;
     stateTime = 0;
+    runSpeed = 0;
     onState?.(next);
   }
 
@@ -79,22 +82,26 @@ export function createBall({ scene, camera, dog, input, world, onState }) {
   }
 
   // Wait for standing to finish before moving the dog along the fetch path.
-  function runToward(x, z, dt, arrived) {
+  function runToward(x, z, dt, arrived, stopDistance = 0) {
     if (dog.motion.stand !== 1) return false;
     const p = dog.root.position;
     const azimuth = Math.atan2(x - p.x, z - p.z);
     if (arrived()) {
+      runSpeed = 0;
       return true;
     }
     const facingOk = turnToward(azimuth, dt) || Math.abs(angleDelta(dog.facing, azimuth)) < 0.6;
     if (facingOk) {
       const remaining = Math.hypot(x - p.x, z - p.z);
-      const stepLen = Math.min(remaining, BALL.runSpeed * upm * dt);
+      const brakingSpeed = Math.sqrt(2 * BALL.runAcceleration * Math.max(0, remaining - stopDistance) / upm);
+      const targetSpeed = Math.min(BALL.runSpeed, Math.max(0.25, brakingSpeed));
+      runSpeed += Math.sign(targetSpeed - runSpeed) * Math.min(Math.abs(targetSpeed - runSpeed), BALL.runAcceleration * dt);
+      const stepLen = Math.min(remaining, runSpeed * upm * dt);
       const nx = p.x + Math.sin(dog.facing) * stepLen;
       const nz = p.z + Math.cos(dog.facing) * stepLen;
       const G = groundAt(nx, nz) ?? fallbackGround;
       dog.setPose(tmp.set(nx, G.y, nz), dog.facing, G.normal);
-    }
+    } else runSpeed = 0;
     return false;
   }
 
@@ -203,7 +210,7 @@ export function createBall({ scene, camera, dog, input, world, onState }) {
 
   return {
     get state() { return state; },
-    // The dog can be petted while it's sitting at home.
+    // The dog can be petted while it's at home.
     dogAtHome: () => state === "idle" || state === "ready",
 
     update(dt) {
@@ -245,7 +252,7 @@ export function createBall({ scene, camera, dog, input, world, onState }) {
           const tooClose = Math.hypot(dog.root.position.x - pos.x, dog.root.position.z - pos.z)
             < BALL.mouth.forward * dog.length;
           return close || (tooClose && stateTime > BALL.noticeSeconds + 0.3);
-        });
+        }, BALL.mouth.forward * dog.length + reach);
         if (done) {
           pickupStart.copy(pos);
           setState("collecting");
