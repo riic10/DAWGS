@@ -11,6 +11,7 @@ import { createPet } from "./interactions/pet.js";
 import { createSplatLod } from "./lod.js";
 import { createSidebar, hasModel } from "./sidebar.js";
 import { createUploadDialog } from "./upload.js";
+import { createSounds } from "./sound.js";
 import { createHfAuth } from "./hf-auth.js";
 import { createPhotoDog } from "./photo-dog.js";
 import { createDogCalibrationPanel } from "../../lib/dog-calibration-panel.ts";
@@ -38,6 +39,30 @@ const hideLoader = () => loaderEl?.classList.add("done");
 // splat scene is still loading (and even if WebGL is slow to start).
 const input = createArduinoInput();
 const hud = createHud(input);
+
+// Sound: garden ambience in the woods, petting and ball-chasing effects.
+const soundHint = document.getElementById("sound-hint");
+const muteBtn = document.getElementById("mute");
+let soundBlocked = false;
+const showSoundState = () => {
+  const muted = sounds.muted;
+  muteBtn.textContent = muted ? "🔇 Muted" : "🔊 Sound";
+  muteBtn.setAttribute("aria-pressed", String(muted));
+  muteBtn.title = muted ? "Turn sound back on (M)" : "Mute all sound (M)";
+  soundHint.hidden = !soundBlocked || muted;
+};
+const sounds = createSounds({
+  onBlocked: (blocked) => { soundBlocked = blocked; showSoundState(); },
+  onMute: showSoundState,
+});
+showSoundState();
+muteBtn.addEventListener("click", () => sounds.toggleMute());
+// M mutes/unmutes, except while typing (e.g. a dog's name).
+window.addEventListener("keydown", (e) => {
+  if (e.repeat || e.metaKey || e.ctrlKey || e.altKey || e.key.toLowerCase() !== "m") return;
+  if (e.target instanceof HTMLElement && e.target.matches("input, textarea, [contenteditable]")) return;
+  sounds.toggleMute();
+});
 
 // Sidebar picks -> dog model in the scene. Dogs without a model keep the
 // current one (the card says "coming soon"). Swaps run one at a time and only
@@ -181,6 +206,7 @@ async function main() {
   maxPixelRatio = setup.maxPixelRatio ?? maxPixelRatio;
   resize();
   obstacles = setup.obstacles;
+  if (setup.ambient) sounds.set(setup.ambient, 1);
 
   const target = setup.dog.ground.clone().add(new THREE.Vector3(0, setup.dog.height * 0.5, 0));
   controls.target.copy(target);
@@ -244,7 +270,7 @@ async function main() {
       dogModel.querySelector('option[value="upload"]')?.remove();
       if (source.file && !source.key) dogModel.add(new Option(source.file.name, "upload"));
       dogModel.value = optionValue(source);
-      window.snoopy = { scene, camera, controls, dog, ball, setup: world, arduino: input, lod: splatLod, dogs: sidebar, upload: uploadDialog, auth };
+      window.snoopy = { scene, camera, controls, dog, ball, setup: world, arduino: input, lod: splatLod, dogs: sidebar, upload: uploadDialog, auth, sounds };
       if (!keepPosition) {
         if (!source.sample) calibrationPanel = createDogCalibrationPanel(document.getElementById("dog-calibration"), {
           profile: dog.profile, onApply: next => replaceDog(currentSource, next, true), onPreview: setInspection,
@@ -355,6 +381,9 @@ renderer.setAnimationLoop((time) => {
     }
     dog.update(dt);
     ball.lateUpdate();
+    sounds.set("petting", inspecting ? 0 : pet.amount);
+    // Running out, picking the ball up and carrying it back.
+    sounds.set("chase", ["fetching", "collecting", "returning"].includes(ball.state) ? 1 : 0);
   } else {
     keepCameraOutOfObstacles();
   }
@@ -362,6 +391,7 @@ renderer.setAnimationLoop((time) => {
     const s = splatLod.state;
     setStatus(`lod ${s.lodSplatScale.toFixed(2)} · ${s.lodRenderScale.toFixed(1)}px · near ${s.proximity.toFixed(2)} · stress ${s.stress.toFixed(2)}`);
   }
+  sounds.update(dt);
   hud.update();
   if (!frameUpdate && !swapping) {
     scene.updateMatrixWorld(true);

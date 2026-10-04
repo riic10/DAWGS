@@ -10,6 +10,8 @@ export function createPet(dog, input, canPet, target = null) {
   const cameraRight = new THREE.Vector3();
 
   return {
+    // 0..1: how much the dog is being petted right now (eased), e.g. for sound.
+    get amount() { return envelope; },
     update(dt) {
       dt = Math.max(0, Math.min(dt, 0.1));
       const available = canPet();

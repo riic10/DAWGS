@@ -40,10 +40,11 @@
   </head>
   <body>
     <div id="hud">
-      <div><button id="connect" hidden>Connect Arduino</button><span id="serial"></span></div>
+      <div><button type="button" id="mute" class="mute" aria-pressed="false" title="Mute all sound (M)">🔊 Sound</button><button id="connect" hidden>Connect Arduino</button><span id="serial"></span></div>
       <div id="readings"></div>
       <div id="game"></div>
-      <div class="hint">Keys: hold T pet · B ball · [ ] distance · 0 release · arrows camera · R reset view · IJKL pet stick · C recentre sticks</div>
+      <div id="sound-hint" class="hint" hidden>🔇 Click anywhere to turn on sound</div>
+      <div class="hint">Keys: hold T pet · B ball · [ ] distance · 0 release · arrows camera · R reset view · IJKL pet stick · C recentre sticks · M mute</div>
     </div>
     <aside id="adopt" aria-label="Adoption profile">
       <svg class="adopt-frame" viewBox="0 0 248 420" preserveAspectRatio="none" aria-hidden="true">
@@ -57,7 +58,7 @@
       </div>
       <div class="adopt-name-row">
         <h1 id="adopt-name" class="adopt-name">Snoopy</h1>
-        <button type="button" id="adopt-rename" class="adopt-rename" title="Rename your dog" aria-label="Rename your dog" hidden>✎</button>
+        <button type="button" id="adopt-rename" class="adopt-rename" title="Rename, download or turn your dog" aria-label="Rename, download or turn your dog" hidden>✎</button>
       </div>
       <ul class="adopt-facts">
         <li><span>Age</span> <strong id="adopt-age">6 months</strong></li>
@@ -111,7 +112,6 @@
         <button type="button" id="upload-download">Download .ply</button>
         <button type="button" id="upload-turn" title="Turn the dog a quarter turn">↻ turn</button>
       </div>
-      <p class="upload-fineprint">Your photo is sent to the TRELLIS Space on Hugging Face to build the 3D model. If you're signed in, the Space also gets a sign-in token that can only read your public profile, so the GPU time counts against your account.</p>
     </dialog>
     <div id="loader" aria-live="polite">
       <img src="/snoopy-dance.gif" alt="" width="128" height="102" />
