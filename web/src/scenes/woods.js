@@ -67,6 +67,7 @@ export async function load(scene) {
       maxPolarAngle: Math.PI * 0.42,
     },
     obstacles: [],
+    ambient: "garden", // looping background sound (sound.js)
     ground,
     unitsPerMeter: UNITS_PER_METER,
     ballRadius: 0.0335 * UNITS_PER_METER, // tennis ball

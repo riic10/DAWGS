@@ -215,6 +215,7 @@ export function createBall({ scene, camera, dog, input, world, onState }) {
       ball.material.dispose();
       shadow.dispose();
     },
+    mesh: ball,
     get state() { return state; },
     get attached() { return attached; },
     get deliveryTarget() { return delivery?.points.at(-1) ?? null; },
