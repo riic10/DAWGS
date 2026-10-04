@@ -1,0 +1,20 @@
+{
+  "name": "snoopygs-web",
+  "version": "1.0.0",
+  "description": "three.js + Spark viewer: Gaussian splat dog in a mesh background",
+  "scripts": {
+    "dev": "vite --host",
+    "build": "vite build",
+    "preview": "vite preview --host",
+    "build:spz": "node tools/ply-to-spz.mjs ../dog_model.ply ../dog_model.spz"
+  },
+  "type": "module",
+  "dependencies": {
+    "@sparkjsdev/spark": "^2.3.1",
+    "three": "^0.186.1"
+  },
+  "devDependencies": {
+    "vite": "^8.3.2"
+  },
+  "private": true
+}
