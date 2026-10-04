@@ -56,6 +56,8 @@ export function createShadow(scene, cfg, radius, defaultLift) {
   scene.add(object);
   const lift = cfg.lift ?? defaultLift;
   const baseOpacity = cfg.kind === "splat" ? 1 : object.material.opacity;
+  let sizeFactor = 1; // current radius / the radius it was built with
+  let strength = 1;
 
   return {
     object,
@@ -66,9 +68,15 @@ export function createShadow(scene, cfg, radius, defaultLift) {
     },
     // 0..1: fade and shrink, e.g. as the thing casting it rises.
     setStrength(s) {
-      object.scale.setScalar(0.6 + 0.4 * s);
+      strength = s;
+      object.scale.setScalar(sizeFactor * (0.6 + 0.4 * s));
       if (cfg.kind === "splat") object.opacity = s;
       else object.material.opacity = baseOpacity * s;
+    },
+    // New radius for a differently sized caster (e.g. another dog model).
+    setSize(newRadius) {
+      sizeFactor = newRadius / radius;
+      object.scale.setScalar(sizeFactor * (0.6 + 0.4 * strength));
     },
     setVisible(v) { object.visible = v; },
   };

@@ -1,24 +1,59 @@
 // Arduino sensors read straight from the browser over Web Serial (Chrome and
 // Edge; needs localhost or https). No server code involved.
 //
-// The firmware prints one CSV line per sample, e.g. "1,0,42\r\n".
+// The firmware prints one CSV line per sample, e.g.
+// "1,0,42,512,509,0,530,500,0\r\n" (see arduino/snoopy/snoopy.ino). Lines with
+// only the first three columns (older firmware) still work; the sticks then
+// stay centred.
 export const ARDUINO = {
-  baudRate: 9600,
-  columns: ["touch", "button", "distance"], // CSV column order the firmware prints
+  baudRate: 9600, // must match Serial.begin() in arduino/snoopy/snoopy.ino
+  // CSV column order the firmware prints. Stick axes are raw analogRead
+  // values; stick clicks are 1 while pressed.
+  columns: ["touch", "button", "distance", "camX", "camY", "camPress", "petX", "petY", "petPress"],
+  minColumns: 3,
   distanceValid: [2, 400], // cm; 0 or out of range means no echo (HC-SR04 timeout)
   buttonDebounceMs: 150,
+  stick: {
+    // Each axis's resting value is measured from the first samples after
+    // connecting (leave the sticks alone while plugging in), instead of
+    // assuming 512: a stick powered from 3.3V rests near 340, and a 12-bit
+    // board reads up to 4095. Full deflection is taken as 0..2×rest, which is
+    // what a pot across the stick's supply gives.
+    calibrateSamples: 12, // ~0.5 s at 25 lines/s
+    minRest: 100, // an axis resting lower isn't a stick (e.g. a 0/1 column); it reads 0
+    deadZone: 0.12, // of full deflection; cheap sticks wobble around their rest
+    // Flip an axis if pushing the stick moves things the wrong way; it depends
+    // on how the module is mounted.
+    invert: { camX: false, camY: false, petX: false, petY: false },
+  },
 };
 
-// Keyboard stand-ins for testing without the board.
-const KEYS = { touch: "t", button: "b", closer: "[", further: "]", stopDistance: "0" };
+// Keyboard stand-ins for testing without the board. Arrow keys are the camera
+// stick, I/J/K/L the pet stick.
+const KEYS = { touch: "t", button: "b", closer: "[", further: "]", stopDistance: "0", cameraPress: "r", calibrate: "c" };
+const STICK_KEYS = {
+  arrowleft: ["cam", "x", -1], arrowright: ["cam", "x", 1], arrowup: ["cam", "y", -1], arrowdown: ["cam", "y", 1],
+  j: ["pet", "x", -1], l: ["pet", "x", 1], i: ["pet", "y", -1], k: ["pet", "y", 1],
+};
 const SIM_DISTANCE = { start: 40, step: 5, min: 5, max: 120, intervalMs: 100 };
 
 // Returns { state, on(type, fn), feedLine(line), connect() }.
+// state.cam / state.pet: { x, y } in -1..1 (right / down positive, dead zone
+// removed), `pressed`, and `raw` ([x, y] as the firmware sent them).
 // Events: "touchstart", "touchend", "buttonpress", "distance" (detail: cm),
-// "connection" (detail: true/false).
+// "camerapress", "petpress", "connection" (detail: true/false).
 export function createArduinoInput() {
   const events = new EventTarget();
-  const state = { connected: false, touch: false, button: false, distance: null, distanceAt: -Infinity };
+  const state = {
+    connected: false, touch: false, button: false, distance: null, distanceAt: -Infinity,
+    cam: { x: 0, y: 0, pressed: false, raw: null },
+    pet: { x: 0, y: 0, pressed: false, raw: null },
+    rest: null, // { camX, camY, petX, petY } once calibrated
+    // What's coming over the wire, so the HUD can say why nothing registers:
+    // when the last good and last unreadable line arrived, and that line.
+    serial: { goodAt: -Infinity, badAt: -Infinity, lastBad: "" },
+  };
+  let badLogged = 0;
   let lastPressAt = -Infinity;
 
   const emit = (type, detail) => events.dispatchEvent(new CustomEvent(type, { detail }));
@@ -38,6 +73,46 @@ export function createArduinoInput() {
     state.button = down;
   }
 
+  // Resting values: the median of the first few samples, per axis.
+  const AXES = ["camX", "camY", "petX", "petY"];
+  let calibrationRows = [];
+  function calibrate() {
+    state.rest = null;
+    calibrationRows = [];
+  }
+  function learnRest(row) {
+    calibrationRows.push(row);
+    if (calibrationRows.length < ARDUINO.stick.calibrateSamples) return;
+    state.rest = Object.fromEntries(AXES.map((axis) => {
+      const values = calibrationRows.map((r) => r[axis]).sort((a, b) => a - b);
+      return [axis, values[values.length >> 1]];
+    }));
+    calibrationRows = [];
+    console.info("Arduino stick rest values:", state.rest);
+  }
+
+  // Raw reading -> -1..1 with the dead zone cut out and the rest rescaled, so
+  // the value starts from 0 just past the dead zone.
+  function stickAxis(row, axis) {
+    const raw = row[axis];
+    const rest = state.rest?.[axis];
+    if (raw === undefined || rest === undefined || rest < ARDUINO.stick.minRest) return 0;
+    const { deadZone, invert } = ARDUINO.stick;
+    let v = (raw - rest) / rest;
+    v = Math.max(-1, Math.min(1, invert[axis] ? -v : v));
+    const mag = Math.max(0, Math.abs(v) - deadZone) / (1 - deadZone);
+    return Math.sign(v) * mag;
+  }
+
+  function setStick(name, x, y, pressed, raw = null) {
+    const stick = state[name];
+    stick.raw = raw;
+    stick.x = x;
+    stick.y = y;
+    if (pressed && !stick.pressed) emit(`${name === "cam" ? "camera" : "pet"}press`);
+    stick.pressed = pressed;
+  }
+
   function setDistance(cm) {
     const [lo, hi] = ARDUINO.distanceValid;
     if (!(cm >= lo && cm <= hi)) return;
@@ -50,13 +125,17 @@ export function createArduinoInput() {
   // for anything malformed: wrong column count, non-numbers, boot chatter.
   function feedLine(line) {
     const parts = line.trim().split(",");
-    if (parts.length !== ARDUINO.columns.length) return false;
+    if (parts.length < ARDUINO.minColumns || parts.length > ARDUINO.columns.length) return false;
     const values = parts.map((p) => (p.trim() === "" ? NaN : Number(p)));
     if (values.some((v) => !Number.isFinite(v))) return false;
-    const row = Object.fromEntries(ARDUINO.columns.map((name, i) => [name, values[i]]));
+    const row = Object.fromEntries(values.map((v, i) => [ARDUINO.columns[i], v]));
     setTouch(row.touch !== 0);
     setButton(row.button !== 0);
     setDistance(row.distance);
+    if (!state.rest && row.camX !== undefined) learnRest(row); // sticks read 0 until this finishes
+    const raw = (x, y) => (x === undefined ? null : [x, y]);
+    setStick("cam", stickAxis(row, "camX"), stickAxis(row, "camY"), Boolean(row.camPress), raw(row.camX, row.camY));
+    setStick("pet", stickAxis(row, "petX"), stickAxis(row, "petY"), Boolean(row.petPress), raw(row.petX, row.petY));
     return true;
   }
 
@@ -68,6 +147,8 @@ export function createArduinoInput() {
   async function open(p) {
     if (port) return;
     port = p;
+    badLogged = 0;
+    calibrate();
     try {
       await port.open({ baudRate: ARDUINO.baudRate });
     } catch (err) {
@@ -92,8 +173,11 @@ export function createArduinoInput() {
         pending += value;
         const lines = pending.split("\n");
         pending = lines.pop(); // partial line, completed by the next chunk
-        for (const line of lines) feedLine(line);
-        if (pending.length > 1024) pending = ""; // no newline at all: wrong baud rate?
+        for (const line of lines) noteLine(line, feedLine(line));
+        if (pending.length > 1024) { // no newline at all: wrong baud rate?
+          noteLine(pending.slice(0, 40), false);
+          pending = "";
+        }
       }
     } catch (err) {
       // Unplugged or the device errored; handled below.
@@ -102,6 +186,15 @@ export function createArduinoInput() {
       reader = null;
       await close();
     }
+  }
+
+  function noteLine(line, ok) {
+    const now = performance.now();
+    if (ok) { state.serial.goodAt = now; return; }
+    if (!line.trim()) return;
+    state.serial.badAt = now;
+    state.serial.lastBad = line.trim();
+    if (badLogged++ < 5) console.warn(`Arduino line not understood (expects ${ARDUINO.columns.join(",")} at ${ARDUINO.baudRate} baud):`, JSON.stringify(line));
   }
 
   async function close() {
@@ -113,6 +206,8 @@ export function createArduinoInput() {
     state.connected = false;
     setTouch(false);
     setButton(false);
+    setStick("cam", 0, 0, false);
+    setStick("pet", 0, 0, false);
     emit("connection", false);
   }
 
@@ -146,10 +241,30 @@ export function createArduinoInput() {
     setDistance(cm);
     simTimer = setInterval(() => setDistance(simDistance), SIM_DISTANCE.intervalMs);
   }
+  // Held stick keys, e.g. "cam,x,-1". Opposite keys cancel out.
+  const heldStickKeys = new Set();
+  function applyStickKeys() {
+    for (const name of ["cam", "pet"]) {
+      let x = 0, y = 0;
+      for (const key of heldStickKeys) {
+        const [stick, axis, dir] = STICK_KEYS[key];
+        if (stick !== name) continue;
+        if (axis === "x") x += dir; else y += dir;
+      }
+      setStick(name, x, y, state[name].pressed);
+    }
+  }
+  const typing = (e) => e.target instanceof HTMLElement && e.target.matches("input, textarea, [contenteditable]");
   window.addEventListener("keydown", (e) => {
-    if (e.repeat || e.metaKey || e.ctrlKey || e.altKey) return;
+    if (e.repeat || e.metaKey || e.ctrlKey || e.altKey || typing(e)) return;
     const key = e.key.toLowerCase();
-    if (key === KEYS.touch) setTouch(true);
+    if (STICK_KEYS[key]) {
+      heldStickKeys.add(key);
+      applyStickKeys();
+      e.preventDefault(); // arrows would scroll the sidebar
+    } else if (key === KEYS.cameraPress) emit("camerapress");
+    else if (key === KEYS.calibrate) calibrate();
+    else if (key === KEYS.touch) setTouch(true);
     else if (key === KEYS.button) setButton(true);
     else if (key === KEYS.closer || key === KEYS.further) {
       const cm = (simDistance ?? state.distance ?? SIM_DISTANCE.start)
@@ -159,10 +274,15 @@ export function createArduinoInput() {
   });
   window.addEventListener("keyup", (e) => {
     const key = e.key.toLowerCase();
-    if (key === KEYS.touch) setTouch(false);
+    if (heldStickKeys.delete(key)) applyStickKeys();
+    else if (key === KEYS.touch) setTouch(false);
     else if (key === KEYS.button) setButton(false);
   });
-  window.addEventListener("blur", () => { setTouch(false); setButton(false); });
+  window.addEventListener("blur", () => {
+    setTouch(false);
+    setButton(false);
+    if (heldStickKeys.size) { heldStickKeys.clear(); applyStickKeys(); }
+  });
 
   return {
     state,
@@ -170,5 +290,6 @@ export function createArduinoInput() {
     on: (type, fn) => events.addEventListener(type, (e) => fn(e.detail)),
     feedLine,
     connect,
+    calibrate, // re-measure the sticks' resting values from the next samples
   };
 }

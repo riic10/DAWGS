@@ -55,11 +55,6 @@ export function createBall({ scene, camera, dog, input, world, onState }) {
   const prev = new THREE.Vector3();
   const vel = new THREE.Vector3();
   const tmp = new THREE.Vector3();
-  const mouthLocal = new THREE.Vector3(
-    -BALL.mouth.forward * dog.length,
-    BALL.mouth.up * dog.height,
-    0,
-  );
 
   let state = "idle";
   let stateTime = 0;
@@ -104,9 +99,10 @@ export function createBall({ scene, camera, dog, input, world, onState }) {
     return false;
   }
 
+  // From the dog's current size, so it follows model swaps.
   function mouthWorld(target) {
     dog.root.updateMatrixWorld(true);
-    return dog.body.localToWorld(target.copy(mouthLocal));
+    return dog.body.localToWorld(target.set(-BALL.mouth.forward * dog.length, BALL.mouth.up * dog.height, 0));
   }
 
   // --- Ball physics -----------------------------------------------------------
@@ -209,6 +205,17 @@ export function createBall({ scene, camera, dog, input, world, onState }) {
 
   return {
     get state() { return state; },
+
+    // Back to idle with no ball, and the dog home and still: used when the dog
+    // model is swapped mid-game.
+    reset() {
+      ball.visible = false;
+      shadow.setVisible(false);
+      vel.set(0, 0, 0);
+      dog.anim.runHop = 0;
+      dog.setPose(dog.home.ground, dog.home.facing, dog.home.normal);
+      setState("idle");
+    },
     // The dog can be petted while it's sitting at home.
     dogAtHome: () => state === "idle" || state === "ready",
 
