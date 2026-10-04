@@ -6,7 +6,8 @@
     "dev": "vite --host",
     "build": "vite build",
     "preview": "vite preview --host",
-    "build:spz": "node tools/ply-to-spz.mjs ../dog_model.ply ../dog_model.spz"
+    "build:spz": "node tools/ply-to-spz.mjs ../dog_model.ply ../dog_model.spz",
+    "build:heightfield": "node tools/heightfield.mjs ../wooded_path_bg.ply ../wooded_path_bg.height.json -100 20 -30 90 1 10"
   },
   "type": "module",
   "dependencies": {

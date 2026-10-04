@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { SplatMesh } from "@sparkjsdev/spark";
+import { loadHeightfield } from "./heightfield.js";
 
 // Wooded path (Gaussian splats, 4.84M). The file is Y-down (3DGS/COLMAP
 // axes), so it's flipped about X like the dog. Viewer coordinates below are
@@ -13,6 +14,7 @@ import { SplatMesh } from "@sparkjsdev/spark";
 // The path really slopes ~10° here (trees and horizon are level).
 const DOG_GROUND = new THREE.Vector3(-40, -22.248, 30);
 const GROUND_UP = new THREE.Vector3(-0.1536, 0.9851, -0.0778).normalize();
+const UNITS_PER_METER = 10;
 
 export async function load(scene) {
   scene.background = new THREE.Color(0xc9d6df);
@@ -23,7 +25,16 @@ export async function load(scene) {
   });
   woods.rotation.x = Math.PI;
   scene.add(woods);
-  await woods.initialized;
+  // Built with: npm run build:heightfield (tools/heightfield.mjs over the
+  // area the camera can reach). Ground for the ball and the dog's fetch run.
+  const [ground] = await Promise.all([loadHeightfield("/wooded_path_bg.height.json"), woods.initialized]);
+
+  // Splats carry their own lighting; these only light meshes (the ball).
+  // Roughly matched to the capture: bright sky, warm low sun.
+  scene.add(new THREE.HemisphereLight(0xdfe9f3, 0x5c5236, 1.3));
+  const sun = new THREE.DirectionalLight(0xfff0d6, 1.8);
+  sun.position.set(60, 80, -40);
+  scene.add(sun);
 
   // Face back toward the capture origin, where the camera starts.
   const toOrigin = Math.atan2(-DOG_GROUND.x, -DOG_GROUND.z);
@@ -55,5 +66,8 @@ export async function load(scene) {
       maxPolarAngle: Math.PI * 0.42,
     },
     obstacles: [],
+    ground,
+    unitsPerMeter: UNITS_PER_METER,
+    ballRadius: 0.0335 * UNITS_PER_METER, // tennis ball
   };
 }

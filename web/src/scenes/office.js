@@ -3,6 +3,7 @@ import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 
 // Low-poly home office (mesh). Scene units: the desk top is ~1.46 above the
 // floor, so 1 unit ≈ 0.5 m.
+const UNITS_PER_METER = 2;
 
 // The GLB ships geometry only (no materials, normals or textures), so each
 // object gets a flat colour by name. Plane.NNN ranges were identified from
@@ -90,21 +91,37 @@ export async function load(scene) {
   if (unknown.length) console.warn("No colour assigned for:", unknown);
   scene.add(gltf.scene);
 
-  const rug = gltf.scene.getObjectByName("Rug");
-  const obstacles = OBSTACLES.map((names) => {
+  const rug = new THREE.Box3().setFromObject(gltf.scene.getObjectByName("Rug"));
+  const floor = new THREE.Box3().setFromObject(gltf.scene.getObjectByName("Floor"));
+  const furniture = OBSTACLES.map((names) => {
     const box = new THREE.Box3();
     for (const name of names) {
       const obj = gltf.scene.getObjectByName(name);
       if (!obj) throw new Error(`Obstacle mesh "${name}" not found in GLB`);
       box.expandByObject(obj);
     }
-    return box.expandByScalar(0.15);
+    return box;
   });
+  // The camera keeps a 0.15 margin from furniture.
+  const obstacles = furniture.map((box) => box.clone().expandByScalar(0.15));
+
+  // Flat floor; the rug sits 0.0035 higher. Off the floor's edge counts as a
+  // wall (the walls on -X/-Z, an invisible one on the open sides), and the
+  // floor-standing furniture blocks the ball like a solid column.
+  const UP = new THREE.Vector3(0, 1, 0);
+  const ground = {
+    at(x, z) {
+      if (x < floor.min.x || x > floor.max.x || z < floor.min.z || z > floor.max.z) return null;
+      const onRug = x >= rug.min.x && x <= rug.max.x && z >= rug.min.z && z <= rug.max.z;
+      const blocked = furniture.some((b) => x >= b.min.x && x <= b.max.x && z >= b.min.z && z <= b.max.z);
+      return { y: onRug ? rug.max.y : floor.max.y, normal: UP, blocked };
+    },
+  };
 
   return {
     // On the rug, clear of the chair, facing the room's open (+X, +Z) corner.
     dog: {
-      ground: new THREE.Vector3(0.5, new THREE.Box3().setFromObject(rug).max.y, -0.3),
+      ground: new THREE.Vector3(0.5, rug.max.y, -0.3),
       facing: Math.PI / 4,
       height: 0.8, // ≈ 0.4 m, a sitting beagle puppy
     },
@@ -123,5 +140,8 @@ export async function load(scene) {
       maxDistance: 7,
     },
     obstacles,
+    ground,
+    unitsPerMeter: UNITS_PER_METER,
+    ballRadius: 0.0335 * UNITS_PER_METER, // tennis ball
   };
 }
