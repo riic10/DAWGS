@@ -170,7 +170,7 @@ export function createBall({ scene, camera, dog, input, world, onState }) {
   }
 
   // --- Button -----------------------------------------------------------------
-  input.on("buttonpress", () => {
+  const removeButtonListener = input.on("buttonpress", () => {
     if (state === "idle") {
       returnPose = dog.motion.target;
       ball.visible = true;
@@ -208,6 +208,13 @@ export function createBall({ scene, camera, dog, input, world, onState }) {
   });
 
   return {
+    dispose() {
+      removeButtonListener?.();
+      ball.removeFromParent();
+      ball.geometry.dispose();
+      ball.material.dispose();
+      shadow.dispose();
+    },
     get state() { return state; },
     get attached() { return attached; },
     get deliveryTarget() { return delivery?.points.at(-1) ?? null; },

@@ -16,8 +16,8 @@ test.afterEach(async ({ page }, testInfo) => {
   await testInfo.attach("fetch-state", { body: JSON.stringify(state), contentType: "application/json" });
 });
 
-for (const scene of ["office", "woods"]) {
-  test(`${scene}: the dog stands, animates the fetch, and sits after returning`, async ({ page }, testInfo) => {
+for (const [scene, uploaded] of [["office", false], ["woods", false], ["office", true], ["woods", true]]) {
+  test(`${scene} ${uploaded ? "standing upload" : "sample"}: the dog animates the fetch and restores its original pose`, async ({ page }, testInfo) => {
     const errors = [];
     page.on("pageerror", error => errors.push(error.message));
     await page.addInitScript(() => {
@@ -29,6 +29,8 @@ for (const scene of ["office", "woods"]) {
         if (!state || window.fetchFrames.length >= 6000) return;
         const { dog, ball } = state;
         const { joints } = dog;
+        const canonicalWorld = dog.canonicalWorld();
+        const scale = Math.hypot(...canonicalWorld.elements.slice(0, 3));
         const carried = state.scene.children.find(object => object.geometry?.type === "SphereGeometry");
         const mouth = dog.mouthWorld();
         window.fetchFrames.push({
@@ -36,7 +38,7 @@ for (const scene of ["office", "woods"]) {
           speed: dog.motion.speed, x: dog.root.position.x, z: dog.root.position.z,
           boneError: Math.max(...joints.posed.map((bone, i) => Math.abs(bone.start.distanceTo(bone.end) - joints.rest[i].start.distanceTo(joints.rest[i].end)))),
           footError: Math.max(0, ...joints.feet.filter(foot => foot.planted).map(foot =>
-            joints.posed[foot.base + 2].end.clone().applyMatrix4(dog.splats.matrixWorld).distanceTo(foot.anchor))),
+            joints.posed[foot.base + 2].end.clone().applyMatrix4(canonicalWorld).distanceTo(foot.anchor))),
           contacts: joints.feet.filter(foot => foot.planted).map(foot => foot.base),
           mouthHeight: mouth.y - dog.root.position.y,
           carryError: carried?.position.distanceTo(mouth),
@@ -44,14 +46,14 @@ for (const scene of ["office", "woods"]) {
           ballPosition: carried?.position.toArray(),
           ballRadius: state.setup.ballRadius,
           gripReady: dog.gripReady, releaseReady: dog.releaseReady,
-          upperContactError: Math.abs(joints.jaw.upper.distanceTo(joints.mouth) * dog.splats.scale.x - state.setup.ballRadius),
-          lowerContactError: Math.abs(joints.jaw.lower.distanceTo(joints.mouth) * dog.splats.scale.x - state.setup.ballRadius),
+          upperContactError: Math.abs(joints.jaw.upper.distanceTo(joints.mouth) * scale - state.setup.ballRadius),
+          lowerContactError: Math.abs(joints.jaw.lower.distanceTo(joints.mouth) * scale - state.setup.ballRadius),
           pitch: joints.gaze.pitch,
           trot: joints.gait.trot,
         });
       });
     });
-    await page.goto(`/?scene=${scene}`);
+    await page.goto(`/?scene=${scene}${uploaded ? "&dog=standing" : ""}`);
     await page.waitForFunction(() => Boolean(window.snoopy), undefined, { timeout: 60_000 });
     await expect(page.locator("#status")).toContainText(`${scene} · dog`);
     const start = await page.evaluate(() => {
@@ -63,11 +65,13 @@ for (const scene of ["office", "woods"]) {
     await expect(page.locator("#game")).toContainText("ready");
     await page.waitForTimeout(180);
     await page.keyboard.press("b");
-    await expect(page.locator("#game")).toHaveText("dog: standing up");
-    await page.waitForFunction(() => window.snoopy.dog.motion.stand >= 0.25);
-    const standing = await page.evaluate(() => Array.from(window.snoopy.dog.splats.skinning.boneData));
-    expect(standing.some((value, index) => Math.abs(value - start.bones[index]) > 0.01)).toBe(true);
-    await page.screenshot({ path: testInfo.outputPath(`${scene}-standing.png`) });
+    if (!uploaded) {
+      await expect(page.locator("#game")).toHaveText("dog: standing up");
+      await page.waitForFunction(() => window.snoopy.dog.motion.stand >= 0.25);
+      const standing = await page.evaluate(() => Array.from(window.snoopy.dog.splats.skinning.boneData));
+      expect(standing.some((value, index) => Math.abs(value - start.bones[index]) > 0.01)).toBe(true);
+      await page.screenshot({ path: testInfo.outputPath(`${scene}-standing.png`) });
+    }
     await page.waitForFunction(() => window.snoopy.dog.motion.speed > 0.1);
     const running = await page.evaluate(() => ({
       phase: window.snoopy.dog.motion.phase,
@@ -81,10 +85,11 @@ for (const scene of ["office", "woods"]) {
     await page.waitForFunction(() => window.snoopy.dog.pickup > 0.8);
     await page.screenshot({ path: testInfo.outputPath(`${scene}-pickup.png`) });
     await expect(page.locator("#game")).toHaveText("ball: press button to get it ready");
-    await page.waitForFunction(() => window.snoopy.dog.motion.stand === 0);
+    await page.waitForFunction(stand => window.snoopy.dog.motion.stand === stand, Number(uploaded));
     const frames = await page.evaluate(() => window.fetchFrames);
     const standingFrames = frames.filter(frame => frame.state === "standing" && frame.stand > 0 && frame.stand < 1);
-    expect(standingFrames.length).toBeGreaterThan(2);
+    if (uploaded) expect(standingFrames.length).toBe(0);
+    else expect(standingFrames.length).toBeGreaterThan(2);
     for (const frame of standingFrames) {
       expect(Math.hypot(frame.x - start.x, frame.z - start.z)).toBeLessThan(1e-8);
     }

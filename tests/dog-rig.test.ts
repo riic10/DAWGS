@@ -2,9 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { Matrix4, Vector3 } from "three";
-import { DogRigFitError, dogSkinWeights, fitDogRig } from "../lib/dog-rig-fit";
-import { createDogPose } from "../lib/dog-rig-pose";
-import { createDogMotion, stepDog } from "../lib/dog-motion";
+import { DogRigFitError, fitDogRig } from "../lib/dog-rig-fit";
 
 function readPoints(name: string) {
   const bytes = readFileSync(new URL(`../${name}.ply`, import.meta.url));
@@ -51,66 +49,6 @@ test("fitting is invariant to export translation, scale and horizontal rotation"
       const nose = new Vector3().setFromMatrixPosition(rawNose).applyMatrix4(transform).applyMatrix4(fitted.toCanonical);
       assert.ok(nose.x < -0.9);
     }
-  }
-});
-
-test("native pose preserves the original splats and all skin weights are finite and normalized", () => {
-  for (const points of [sitting, standing]) {
-    const fit = fitDogRig(points), pose = createDogPose(fit), motion = createDogMotion();
-    motion.stand = motion.target = Number(fit.startsStanding);
-    pose.update(motion);
-    for (const p of points.filter((_, i) => i % 17 === 0)) {
-      const weights = dogSkinWeights(p.clone().applyMatrix4(fit.toCanonical), fit);
-      assert.equal(weights.length, 4);
-      assert.ok(Math.abs(weights.reduce((sum, [, w]) => sum + w, 0) - 1) < 1e-10);
-      const deformed = new Vector3();
-      for (const [bone, weight] of weights) {
-        assert.ok(Number.isFinite(weight) && weight >= 0 && bone >= 0 && bone < 13);
-        deformed.addScaledVector(p.clone().applyMatrix4(pose.matrices[bone]), weight);
-      }
-      assert.ok(deformed.distanceTo(p) < 1e-8);
-    }
-  }
-});
-
-test("walking deforms the legs, preserves joint connections, and never lowers paws through the floor", () => {
-  for (const points of [sitting, standing]) {
-    const fit = fitDogRig(points), pose = createDogPose(fit), motion = createDogMotion();
-    motion.stand = motion.target = motion.stride = 1;
-    motion.speed = 0.65;
-    let maxLift = 0, minLift = 1;
-    for (let frame = 0; frame < 120; frame++) {
-      stepDog(motion, new Set(["KeyW"]), 1 / 60);
-      pose.update(motion);
-      for (const foot of [4, 7, 9, 12]) {
-        const lift = -pose.posed[foot].end.y;
-        assert.ok(lift >= -1e-10 && lift <= 0.061);
-        maxLift = Math.max(maxLift, lift); minLift = Math.min(minLift, lift);
-      }
-      for (const [a, b] of [[3, 4], [5, 6], [6, 7], [8, 9], [10, 11], [11, 12]]) {
-        assert.ok(pose.posed[a].end.distanceTo(pose.posed[b].start) < 1e-10);
-      }
-      for (const matrix of pose.matrices) assert.ok(matrix.elements.every(Number.isFinite));
-    }
-    assert.ok(maxLift > 0.05 && minLift === 0);
-  }
-});
-
-test("sit and stand transitions are reversible without changing the fitted rest geometry", () => {
-  for (const points of [sitting, standing]) {
-    const fit = fitDogRig(points), pose = createDogPose(fit), motion = createDogMotion();
-    const original = fit.rest.map(b => [b.start.toArray(), b.end.toArray()]);
-    motion.stand = motion.target = Number(fit.startsStanding);
-    for (const target of [1 - motion.target, motion.target]) {
-      motion.target = target;
-      for (let i = 0; i < 70; i++) {
-        stepDog(motion, new Set(), 1 / 60); pose.update(motion);
-        assert.ok(pose.matrices.every(m => m.elements.every(Number.isFinite)));
-      }
-      assert.equal(motion.stand, target);
-    }
-    assert.deepEqual(fit.rest.map(b => [b.start.toArray(), b.end.toArray()]), original);
-    for (const matrix of pose.matrices) matrix.elements.forEach((v, i) => assert.ok(Math.abs(v - (i % 5 === 0 ? 1 : 0)) < 1e-8));
   }
 });
 

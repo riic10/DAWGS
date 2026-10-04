@@ -3,6 +3,7 @@ import { SplatMesh } from "@sparkjsdev/spark";
 import { createShadow } from "./shadow.js";
 import { createDogMotion, stepDog } from "../../lib/dog-motion.ts";
 import { createSampleDogRig } from "../../lib/sample-dog-rig.ts";
+import { createDogRig } from "../../lib/dog-rig.ts";
 
 const DOG = {
   url: "/dog_model.spz", // built from dog_model.ply by tools/ply-to-spz.mjs
@@ -19,11 +20,21 @@ const UP = new THREE.Vector3(0, 1, 0);
 //
 // Facing is an azimuth in radians from +Z toward +X, the same convention as
 // OrbitControls. Animation modules write `dog.anim`; `dog.update()` applies it.
-export async function loadDog(scene, { ground, normal = UP, facing, height, unitsPerMeter, groundHeight }, shadowCfg) {
-  const splats = new SplatMesh({ url: DOG.url, lod: false, enableLod: false, extSplats: true, covSplats: true });
-  await splats.initialized;
-  const rig = createSampleDogRig(splats, groundHeight);
+export async function loadDog(scene, { ground, normal = UP, facing, height, unitsPerMeter, groundHeight }, shadowCfg,
+  source = { url: DOG.url, sample: true }, calibration = {}) {
+  const file = source.file ? { fileBytes: await source.file.arrayBuffer(), fileName: source.file.name } : { url: source.url };
+  const splats = new SplatMesh({ ...file, lod: false, enableLod: false, extSplats: true, covSplats: true });
+  let rig;
+  try {
+    await splats.initialized;
+    rig = source.sample ? createSampleDogRig(splats, groundHeight) : createDogRig(splats, groundHeight, calibration);
+  } catch (error) {
+    splats.dispose();
+    throw error;
+  }
+  const { fit } = rig;
   const motion = createDogMotion();
+  motion.stand = motion.target = Number(fit.startsStanding);
   const noKeys = new Set();
   const previousPosition = ground.clone();
   let previousFacing = facing;
@@ -37,13 +48,15 @@ export async function loadDog(scene, { ground, normal = UP, facing, height, unit
 
   splats.quaternion.setFromEuler(DOG.rotation);
   splats.updateMatrix();
-  const box = splats.getBoundingBox(true).applyMatrix4(splats.matrix);
+  const box = splats.getBoundingBox(true).applyMatrix4(fit.toCanonical).applyMatrix4(splats.matrix);
   const size = box.getSize(new THREE.Vector3());
   const scale = height / size.y;
   splats.scale.setScalar(scale);
   const center = box.getCenter(new THREE.Vector3());
-  // The rig plants its paws at raw Y = 0.405, above the outliers in the bounds.
-  splats.position.set(-center.x * scale, 0.405 * scale, -center.z * scale);
+  splats.position.set(-center.x * scale, fit.floor * scale, -center.z * scale);
+  splats.updateMatrix();
+  splats.matrix.multiply(fit.toCanonical);
+  splats.matrix.decompose(splats.position, splats.quaternion, splats.scale);
 
   const root = new THREE.Group();
   const body = new THREE.Group();
@@ -57,7 +70,8 @@ export async function loadDog(scene, { ground, normal = UP, facing, height, unit
   const shadow = createShadow(scene, shadowCfg, shadowRadius, height * 0.0025);
 
   const dog = {
-    root, body, splats, height, length, width, motion, joints: rig.pose,
+    root, body, splats, height, length, width, motion, joints: rig.pose, profile: fit,
+    maxBallRadius: Math.min(fit.mouth.hinge.distanceTo(fit.mouth.upperLip), fit.mouth.hinge.distanceTo(fit.mouth.lowerLip)) * scale * 0.75,
     pickup: 0,
     mouthRadius: 0, jawOpen: 0,
     home: { ground: ground.clone(), normal: normal.clone(), facing },
@@ -67,6 +81,12 @@ export async function loadDog(scene, { ground, normal = UP, facing, height, unit
     get gripAmount() { return rig.pose.jaw.gripAngle / rig.pose.jaw.openAngle; },
     get gripReady() { return Math.abs(rig.pose.jaw.angle - rig.pose.jaw.gripAngle) < 0.015; },
     get releaseReady() { return rig.pose.jaw.angle > rig.pose.jaw.gripAngle + 0.14; },
+    inspect: rig.inspect,
+
+    canonicalWorld(target = new THREE.Matrix4()) {
+      splats.updateWorldMatrix(true, false);
+      return target.copy(splats.matrixWorld).multiply(fit.fromCanonical);
+    },
 
     setPose(point, newFacing = dog.facing, groundNormal = dog.groundNormal) {
       dog.facing = newFacing;
@@ -86,7 +106,7 @@ export async function loadDog(scene, { ground, normal = UP, facing, height, unit
 
     mouthWorld(target = new THREE.Vector3()) {
       splats.updateWorldMatrix(true, false);
-      return target.copy(rig.pose.mouth).applyMatrix4(splats.matrixWorld);
+      return target.copy(rig.pose.mouth).applyMatrix4(fit.fromCanonical).applyMatrix4(splats.matrixWorld);
     },
 
     reachMouth(point) {
@@ -95,13 +115,13 @@ export async function loadDog(scene, { ground, normal = UP, facing, height, unit
 
     pickupPoint(target = new THREE.Vector3()) {
       splats.updateWorldMatrix(true, false);
-      return target.copy(rig.pose.pickupGround).applyMatrix4(splats.matrixWorld);
+      return target.copy(rig.pose.pickupGround).applyMatrix4(fit.fromCanonical).applyMatrix4(splats.matrixWorld);
     },
 
     pickupDistance(point) {
       splats.updateWorldMatrix(true, false);
-      localBall.copy(point).applyMatrix4(inverseWorld.copy(splats.matrixWorld).invert());
-      return rig.pose.pickupApproach(localBall, pickupPoint).applyMatrix4(splats.matrixWorld)
+      localBall.copy(point).applyMatrix4(inverseWorld.copy(splats.matrixWorld).multiply(fit.fromCanonical).invert());
+      return rig.pose.pickupApproach(localBall, pickupPoint).applyMatrix4(fit.fromCanonical).applyMatrix4(splats.matrixWorld)
         .sub(root.position).dot(dog.forward(forward));
     },
 
@@ -133,6 +153,13 @@ export async function loadDog(scene, { ground, normal = UP, facing, height, unit
       attention.petTarget = dog.anim.petTarget;
       rig.update(motion, dt, attention);
       shadow.place(root.position, dog.groundNormal);
+    },
+
+    dispose() {
+      root.removeFromParent();
+      rig.dispose();
+      splats.dispose();
+      shadow.dispose();
     },
   };
   dog.setPose(ground, facing, normal);

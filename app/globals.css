@@ -107,6 +107,25 @@ h2 {
   position: relative;
   margin-bottom: 17px;
 }
+
+.rig-calibration-host {
+  position: absolute;
+  right: 16px;
+  bottom: 40px;
+  z-index: 4;
+  max-width: 270px;
+  max-height: 65%;
+  overflow: auto;
+  font: 12px/1.5 system-ui, sans-serif;
+}
+.rig-calibration-host:not(:empty) {
+  padding: 8px 12px;
+  border: 1px solid #d8dbd1;
+  border-radius: 8px;
+  background: #fffef9;
+}
+.rig-calibration-host summary { cursor: pointer; }
+.rig-calibration-host button, .rig-calibration-host input, .rig-calibration-host select { font: inherit; }
 .dropzone strong {
   font-size: 12px;
   font-weight: 550;

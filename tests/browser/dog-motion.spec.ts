@@ -291,6 +291,23 @@ for (const [model, initialPose, count] of [["standing_dog", "Standing", "241,056
     await page.keyboard.press("c");
     await expect(status).toHaveText("Standing");
     await page.locator(".viewer-stage").screenshot({ path: `/private/tmp/${model}-auto-standing.png` });
+    if (model === "standing_dog") {
+      await page.getByText("Adjust dog fit", { exact: true }).click();
+      const position = await host.getAttribute("data-dog-position");
+      await page.keyboard.down("w");
+      await page.waitForTimeout(180);
+      await page.keyboard.up("w");
+      await expect(host).toHaveAttribute("data-dog-position", position!);
+      await page.getByRole("combobox", { name: "Joint", exact: true }).selectOption("leftElbow");
+      const side = Number(await page.getByLabel("Side", { exact: true }).inputValue());
+      await page.getByLabel("Side", { exact: true }).fill(String(side + 0.5));
+      await page.getByRole("button", { name: "Apply joint adjustment" }).click();
+      await expect(page.locator(".dog-calibration [role=status]")).toContainText("Fit applied");
+      await page.locator(".viewer-stage").screenshot({ path: "/private/tmp/standing-dog-studio-calibration.png" });
+      await page.getByRole("button", { name: "Reset automatic fit" }).click();
+      await expect(page.getByLabel("Side", { exact: true })).toHaveValue(side.toFixed(2));
+      await page.getByText("Adjust dog fit", { exact: true }).click();
+    }
     await page.reload();
     await expect(page.getByText("YOUR CREATION", { exact: true })).toBeVisible();
     await expect(status).toHaveText(initialPose);

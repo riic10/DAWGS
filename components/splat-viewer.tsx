@@ -12,6 +12,7 @@ type Props = {
 
 export default function SplatViewer({ source, onReady, onLoading }: Props) {
   const host = useRef<HTMLDivElement>(null);
+  const calibrationHost = useRef<HTMLDivElement>(null);
   const reset = useRef<() => void>(() => {});
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
@@ -72,8 +73,10 @@ export default function SplatViewer({ source, onReady, onLoading }: Props) {
       let frameUpdate: Promise<void> | undefined;
       let released = false;
       let mesh: InstanceType<typeof SplatMesh> | undefined;
-      let rig: { update: (motion: ReturnType<typeof createDogMotion>, dt?: number) => void; dispose: () => void } | undefined;
+      let rig: ReturnType<typeof import("@/lib/dog-rig").createDogRig> | undefined;
       let removeInput = () => {};
+      let removeCalibration = () => {};
+      let inspecting = false;
       let ground: InstanceType<typeof THREE.GridHelper> | undefined;
       const resize = new ResizeObserver(() => {
         const { width, height } = container.getBoundingClientRect();
@@ -96,6 +99,7 @@ export default function SplatViewer({ source, onReady, onLoading }: Props) {
         resize.disconnect();
         controls.dispose();
         removeInput();
+        removeCalibration();
         togglePose.current = () => {};
         buttonInput.current = { press: () => {}, release: () => {}, cancel: () => {}, click: () => {} };
         renderer.domElement.removeEventListener(
@@ -171,6 +175,36 @@ export default function SplatViewer({ source, onReady, onLoading }: Props) {
           groundHeight = uploadedRig.fit.ground;
           headingOffset = -uploadedRig.fit.heading;
           motion.stand = motion.target = Number(uploadedRig.fit.startsStanding);
+          const { createDogCalibrationPanel } = await import("@/lib/dog-calibration-panel");
+          if (disposed) return;
+          let beforeInspection = motion.target;
+          const panel = createDogCalibrationPanel(calibrationHost.current!, {
+            profile: uploadedRig.fit,
+            onFocus: () => reset.current(),
+            onApply: async (calibration) => {
+              if (frameUpdate) await frameUpdate;
+              if (disposed) throw new Error("The viewer was closed.");
+              const next = createDogRig(mesh!, undefined, calibration);
+              rig?.dispose();
+              rig = next;
+              groundHeight = next.fit.ground;
+              headingOffset = -next.fit.heading;
+              motion.stand = motion.target = Number(next.fit.startsStanding);
+              if (ground) ground.position.y = mesh!.position.y - groundHeight * mesh!.scale.y;
+              setPose(dogPose(motion));
+              return next.fit;
+            },
+            onPreview: (visible, landmark) => {
+              if (visible && !inspecting) {
+                beforeInspection = motion.target;
+                motion.stand = motion.target = Number(rig!.fit.startsStanding);
+                keys.clear(); keyTaps.clear(); buttonKeys.clear();
+              } else if (!visible && inspecting) motion.target = beforeInspection;
+              inspecting = visible;
+              rig?.inspect(visible, landmark);
+            },
+          });
+          removeCalibration = () => panel.dispose();
         } catch (cause) {
           if (!(cause instanceof DogRigFitError)) throw cause;
           setRigNotice(`${cause.message} You can still orbit and download the model.`);
@@ -201,6 +235,7 @@ export default function SplatViewer({ source, onReady, onLoading }: Props) {
         const focus = () => canvas.focus({ preventScroll: true });
         buttonInput.current = {
           press: (key) => {
+            if (inspecting) return;
             focus();
             buttonKeys.add(key);
             pointerClicks.add(key);
@@ -220,11 +255,13 @@ export default function SplatViewer({ source, onReady, onLoading }: Props) {
           },
         };
         togglePose.current = () => {
+          if (inspecting) return;
           motion.target = motion.target === 0 ? 1 : 0;
           clear();
           setPose(dogPose(motion));
         };
         const keydown = (event: KeyboardEvent) => {
+          if (inspecting) return;
           if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) return;
           const target = event.target;
           if (target instanceof HTMLElement && (target.isContentEditable || target.closest("input, textarea, select"))) return;
@@ -274,7 +311,7 @@ export default function SplatViewer({ source, onReady, onLoading }: Props) {
         const dt = (time - previousTime) / 1000;
         previousTime = time;
         if (rig) {
-          stepDog(motion, buttonKeys.size || keyTaps.size ? new Set([...keys, ...buttonKeys, ...keyTaps.keys()]) : keys, dt);
+          if (!inspecting) stepDog(motion, buttonKeys.size || keyTaps.size ? new Set([...keys, ...buttonKeys, ...keyTaps.keys()]) : keys, dt);
           for (const [key, remaining] of keyTaps) {
             const next = remaining - Math.max(0, Math.min(dt, 0.05));
             if (next <= 0) keyTaps.delete(key);
@@ -355,6 +392,7 @@ export default function SplatViewer({ source, onReady, onLoading }: Props) {
   return (
     <>
       <div ref={host} className="canvas-host" />
+      <div ref={calibrationHost} className="rig-calibration-host" />
       {rigged && !loading && !error && (
         <div className="dog-controls">
           <strong role="status">{pose}</strong>

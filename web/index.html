@@ -23,6 +23,17 @@
         border-radius: 3px; padding: 2px 8px; margin-right: 6px; cursor: pointer;
       }
       #readings { font-variant-numeric: tabular-nums; }
+      #dog-panel {
+        position: fixed; top: 12px; right: 12px; max-width: min(280px, 42vw); max-height: 80vh; overflow: auto;
+        z-index: 2; padding: 8px 10px; border-radius: 6px; background: rgba(20, 25, 22, 0.86);
+        color: white; font: 12px/1.5 system-ui, sans-serif;
+      }
+      #dog-panel summary { cursor: pointer; }
+      #dog-options { border: 0; padding: 6px 0 0; margin: 0; display: grid; gap: 8px; min-width: 0; }
+      #dog-panel button, #dog-panel select, #dog-panel input { font: inherit; max-width: 100%; }
+      #dog-panel button { cursor: pointer; }
+      #dog-panel small { display: block; opacity: 0.8; }
+      #dog-error { color: #ffcaad; }
     </style>
   </head>
   <body>
@@ -104,6 +115,17 @@
       <img src="/snoopy-dance.gif" alt="" width="128" height="102" />
       <p id="loader-text">Loading…</p>
     </div>
+    <details id="dog-panel">
+      <summary>Dog</summary>
+      <fieldset id="dog-options" disabled>
+        <label>Model <select id="dog-model"><option value="sample">Sample dog</option><option value="standing">Standing dog</option></select></label>
+        <label>Upload dog PLY <input id="dog-upload" type="file" accept=".ply" /></label>
+        <small>One full dog, standing or sitting, in a Y-down Gaussian PLY such as a TRELLIS export. Files stay in this tab.</small>
+        <button id="dog-pose" type="button">Stand up</button>
+        <div id="dog-calibration"></div>
+      </fieldset>
+      <div id="dog-error" role="alert"></div>
+    </details>
     <div id="status">Loading…</div>
     <script type="module" src="/src/main.js"></script>
   </body>

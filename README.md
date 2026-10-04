@@ -37,7 +37,17 @@ Petting turns the head toward the viewer, lifts the chin, and leans the neck int
 
 The procedural gait timing and joint movement are informed by [Catavitello et al. (2015)](https://pmc.ncbi.nlm.nih.gov/articles/PMC4517757/) and [Fischer's canine locomotion research](https://www.vdh.de/fileadmin/media/dog-health/abstracts/Dogs_in_motion_-_Interdependencies_of_skeleton_muscles_and_locomotion.pdf). The curves are hand tuned to this scan, not imported motion capture.
 
-The sample rig is shared with the studio viewer. Uploaded dogs still use the automatic rig. The woods, office, ball physics, petting, and Arduino camera controls come from the original environment viewer.
+The sample and uploaded dogs share the same 20-joint animator in the world and studio viewers. The sample keeps its calibrated skeleton and skin weights. Uploads get their own fitted proportions, joints, stride length, mouth size, and resting jaw opening. The woods, office, ball physics, petting, and Arduino camera controls come from the original environment viewer.
+
+### Use another dog
+
+Open **Dog** at the top right of either environment. Choose **Standing dog** to try `standing_dog.ply`, or choose a local Gaussian `.ply` file up to 128 MB. The upload stays in the browser tab. A standing scan starts standing; a seated scan stands before fetching. The sit/stand button changes the pose between fetches. Both use the same petting, jaw pickup, and camera-directed ball delivery. The ball gets smaller when needed to fit the dog's muzzle.
+
+Direct links: `/?dog=standing` for the woods and `/?scene=office&dog=standing` for the office.
+
+**Adjust dog fit** pauses the interaction and shows the skeleton over the native pose. Use **Zoom to dog**, select a joint, and adjust its forward, height, or side position as a percentage of dog height. The selected joint is yellow. Facing and original-pose corrections trigger a fresh fit; **Reset automatic fit** removes manual corrections. The upper lip, lower lip, jaw hinge, and mouth width can be adjusted separately. Closing the panel resumes the interaction. Corrections last until the model is replaced or the page reloads.
+
+Use an isolated, full-body dog with recognizable paws and muzzle, in an upright Y-down Gaussian PLY such as a TRELLIS export. Facing, translation, and uniform export scale are fitted automatically. Cropped dogs, lying poses, heavy occlusion, arbitrary export axes, and non-dog subjects are outside the supported assumptions. Fitting is geometric, not learned anatomy recognition. Other breeds can need joint and mouth corrections; missing fur, mouth surfaces, or hidden limbs cannot be recovered from the rig alone. A failed world upload reports the problem and keeps the current dog available.
 
 From the repository root, `npm run dev:world` also starts this viewer after installing its dependencies in `web/`. Build it with `npm run build:world`.
 
@@ -68,7 +78,7 @@ The page reads the Arduino directly over USB with the Web Serial API, so it need
 | Sensor | Action |
 | --- | --- |
 | Touch | The dog leans into petting, tilts its head, and gently wags its tail |
-| Button | 1st press: ball in hand. 2nd press: throw it; the dog fetches it and drops it back at its spot |
+| Button | 1st press: ball in hand. 2nd press: throw it; the dog fetches it and brings it toward the camera |
 | Distance | The closer you are, the closer the camera gets to the dog (10–80 cm maps to the scene's zoom range); after 1 s without readings the mouse wheel takes over |
 | Camera stick | Left/right orbits around the dog, up/down tilts the camera; speed follows how far you push. Click: ease back to the starting view |
 | Pet stick | Pushing it pets the dog (harder the further you push) and the dog leans towards that side of the screen. Click: full pet, like touch |
@@ -133,7 +143,7 @@ Open http://localhost:3000. The bundled dog model works without credentials.
 
 Press **C** to stand or sit, then use **W** to walk forward, **S** to back up, **A** to turn left, and **D** to turn right relative to the dog. Keyboard controls work without clicking the canvas first and ignore typing in form fields. Hold **W+A** or **W+D** to walk in an arc. A/D alone turn in place, and holding both cancels the turn. Brief keyboard taps produce a short step or turn. Orbiting the camera does not change the controls. You can also click the on-screen W/A/S/D buttons for a short step or turn, or hold them for continuous movement. The C and sit/stand buttons toggle the pose. Movement is blocked while sitting and throughout either pose transition. Changing focus or switching tabs releases held keys.
 
-Uploaded dogs are fitted automatically after generation. The browser estimates facing direction, body proportions, head, feet, and sitting or standing pose from the splat geometry, then attaches a procedural skeleton. A standing dog starts standing. Spark deforms the original splats on the GPU, with a walk cycle and camera follow. The bundled sample retains its hand-fitted rig.
+Uploaded dogs are fitted automatically after generation. The browser estimates facing direction, body proportions, head, feet, mouth, and sitting or standing pose from the splat geometry, then attaches the shared procedural skeleton. A standing dog starts standing. Spark deforms the original splats on the GPU, with planted paw contacts and camera follow. **Adjust dog fit** provides the same joint corrections as the world viewer. The bundled sample retains its calibrated profile.
 
 Use a clear full-body photo of one dog, standing or sitting, from the side or a three-quarter angle. This is a geometry-based hackathon prototype, not a learned animal rig or a 4D reconstruction. Missing or folded rear-leg geometry can stretch or distort during pose changes. Cropped dogs, lying poses, heavy occlusion, and non-dog subjects are outside the supported input assumptions. If fitting fails, the viewer explains why and keeps orbiting and downloading available.
 
