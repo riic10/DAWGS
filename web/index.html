@@ -4,6 +4,9 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>SnoopyGS</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Gaegu:wght@400;700&family=Patrick+Hand&display=swap" rel="stylesheet" />
     <style>
       html, body { margin: 0; height: 100%; overflow: hidden; background: #dcd6cc; }
       canvas { display: block; touch-action: none; }
@@ -28,6 +31,33 @@
       <div id="readings"></div>
       <div id="game"></div>
       <div class="hint">Keys: hold T pet · B ball · [ ] distance · 0 release</div>
+    </div>
+    <aside id="adopt" aria-label="Adoption profile">
+      <svg class="adopt-frame" viewBox="0 0 248 420" preserveAspectRatio="none" aria-hidden="true">
+        <path d="M10 18 C 8 8, 28 6, 46 10 C 90 4, 150 8, 198 7 C 228 6, 242 16, 239 36 C 244 90, 240 180, 241 270 C 243 330, 246 380, 232 400 C 210 414, 140 408, 80 410 C 40 412, 8 400, 8 372 C 4 300, 10 200, 7 110 C 5 70, 12 30, 10 18 Z" fill="none" stroke="#3a2f24" stroke-width="2.4"/>
+      </svg>
+      <div class="adopt-star" aria-hidden="true"></div>
+      <div class="adopt-star adopt-star-2" aria-hidden="true"></div>
+      <p class="adopt-kicker">now appearing</p>
+      <div class="adopt-photo-wrap">
+        <img id="adopt-photo" alt="Snoopy" />
+      </div>
+      <h1 id="adopt-name" class="adopt-name">Snoopy</h1>
+      <ul class="adopt-facts">
+        <li><span>Age</span> <strong id="adopt-age">6 months</strong></li>
+        <li><span>Breed</span> <strong id="adopt-breed">Beagle</strong></li>
+        <li><span>Gender</span> <strong id="adopt-gender">Female</strong></li>
+      </ul>
+      <p id="adopt-bio" class="adopt-bio"></p>
+      <div class="adopt-nav">
+        <button type="button" id="adopt-prev">← previous</button>
+        <span id="adopt-count">1 / 4</span>
+        <button type="button" id="adopt-next">next →</button>
+      </div>
+    </aside>
+    <div id="loader" aria-live="polite">
+      <img src="/snoopy-dance.gif" alt="" width="128" height="102" />
+      <p id="loader-text">Loading…</p>
     </div>
     <div id="status">Loading…</div>
     <script type="module" src="/src/main.js"></script>

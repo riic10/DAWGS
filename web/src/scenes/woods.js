@@ -21,7 +21,7 @@ export async function load(scene) {
 
   const woods = new SplatMesh({
     url: "/wooded_path_bg.spz", // built from wooded_path_bg.ply by tools/ply-to-spz.mjs
-    lod: true, // 4.8M splats: let Spark pick a per-frame subset for the budget
+    lod: true, // 4.8M splats: Spark picks a view-dependent subset; splatLod eases the budget
   });
   woods.rotation.x = Math.PI;
   scene.add(woods);
@@ -47,14 +47,15 @@ export async function load(scene) {
     view: { radius: 26, phi: 1.3, theta: toOrigin },
     camera: { near: 0.1, far: 2000 },
     // Orbiting at 2560x1440 (2× pixel density) on an M5, MSAA off: 35 fps with
-    // Spark defaults, 60 fps (display cap) with these; the image looks nearly
-    // the same.
-    // - lodSplatScale 0.35: 35% of Spark's LoD budget (2.5M desktop, 1.5M
-    //   iOS, 1M Android).
-    // - lodRenderScale 2: skip LoD splats smaller than 2 px.
-    // - maxStdDev 2: draw each splat out to 2σ instead of √8σ; the cost is
-    //   mostly blending big overlapping splats, so this is the biggest win.
+    // Spark defaults, 60 fps (display cap) at ~0.35 / 2 px; the image looks
+    // nearly the same. These are the first-frame values; splatLod then eases
+    // the budget with camera distance (far cheaper, close a modest bump).
+    // maxStdDev stays 2: drawing each splat out to 2σ instead of √8σ is the
+    // biggest fill-rate win and is not worth raising when close.
     spark: { lodSplatScale: 0.35, lodRenderScale: 2, maxStdDev: 2 },
+    // Camera-to-Snoopy distance (orbit radius). minDistance 6 / maxDistance 45;
+    // start easing before the stops so quality ramps while still moving.
+    splatLod: { nearDistance: 8, farDistance: 38 },
     maxPixelRatio: 1.5, // headroom for slower machines; 2 also held 60 fps
     controls: {
       minDistance: 6,

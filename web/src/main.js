@@ -7,6 +7,8 @@ import { createArduinoInput } from "./input/arduino.js";
 import { createBall } from "./interactions/ball.js";
 import { createCameraDistance } from "./interactions/camera-distance.js";
 import { createPet } from "./interactions/pet.js";
+import { createSplatLod } from "./lod.js";
+import { createSidebar } from "./sidebar.js";
 
 // Backgrounds, picked with ?scene=<name>. The first is the default.
 const SCENES = {
@@ -16,7 +18,19 @@ const SCENES = {
 
 const params = new URLSearchParams(location.search);
 const statusEl = document.getElementById("status");
-const setStatus = (text) => { statusEl.textContent = text; };
+const loaderEl = document.getElementById("loader");
+const loaderText = document.getElementById("loader-text");
+const setStatus = (text) => {
+  statusEl.textContent = text;
+  if (loaderText) loaderText.textContent = text;
+};
+const hideLoader = () => loaderEl?.classList.add("done");
+
+// UI first, so the profile card and "Connect Arduino" work while the
+// splat scene is still loading (and even if WebGL is slow to start).
+const input = createArduinoInput();
+const hud = createHud(input);
+const sidebar = createSidebar();
 
 // No MSAA: it doesn't help soft splats and multiplies the cost of blending
 // overlapping ones.
@@ -39,12 +53,11 @@ const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 controls.enablePan = false; // keep the orbit centred on the dog
 
-// Arduino first, so "Connect Arduino" works while the scene is still loading.
-const input = createArduinoInput();
-const hud = createHud(input);
-
 // Per-frame work once the scene is up; see main().
 let interactions = null;
+let splatLod = null;
+const debugLod = params.has("debug");
+let debugLodFrames = 0;
 
 // ?debug: draw the ground the ball and dog use (green free, red blocked).
 function drawGroundDebug(ground, center, half) {
@@ -94,10 +107,15 @@ async function main() {
     pet: createPet(dog, input, ball.dogAtHome),
     cameraDistance: createCameraDistance(input, camera, controls),
   };
-  if (params.has("debug")) drawGroundDebug(setup.ground, setup.dog.ground, 4 * setup.unitsPerMeter); // ±4 m
+  if (setup.splatLod) {
+    splatLod = createSplatLod({ spark, camera, target: controls.target, ...setup.splatLod });
+    splatLod.update(0);
+  }
+  if (debugLod) drawGroundDebug(setup.ground, setup.dog.ground, 4 * setup.unitsPerMeter); // ±4 m
 
   setStatus(`${name} · dog ${dog.splats.numSplats.toLocaleString()} splats`);
-  window.snoopy = { scene, camera, controls, dog, ball, setup, arduino: input }; // for console tweaking
+  hideLoader();
+  window.snoopy = { scene, camera, controls, dog, ball, setup, arduino: input, lod: splatLod, dogs: sidebar }; // for console tweaking
 }
 
 window.addEventListener("resize", () => {
@@ -132,12 +150,17 @@ renderer.setAnimationLoop((time) => {
     const { dog, ball, pet, cameraDistance } = interactions;
     cameraDistance.update(dt);
     keepCameraOutOfObstacles();
+    if (splatLod) splatLod.update(dt);
     pet.update(dt);
     ball.update(dt);
     dog.update();
     ball.lateUpdate();
   } else {
     keepCameraOutOfObstacles();
+  }
+  if (debugLod && splatLod && ++debugLodFrames % 20 === 0) {
+    const s = splatLod.state;
+    setStatus(`lod ${s.lodSplatScale.toFixed(2)} · ${s.lodRenderScale.toFixed(1)}px · near ${s.proximity.toFixed(2)} · stress ${s.stress.toFixed(2)}`);
   }
   hud.update();
   renderer.render(scene, camera);
