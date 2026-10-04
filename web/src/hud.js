@@ -59,7 +59,7 @@ export function createHud(input) {
         `${x.toFixed(1)},${y.toFixed(1)}${raw ? ` (${raw.join(",")})` : ""}${pressed ? " ●" : ""}`;
       readingsEl.textContent =
         `touch ${touch ? "●" : "○"}  button ${button ? "●" : "○"}  distance ${fresh ? `${Math.round(distance)} cm` : "–"}` +
-        `  camera ${stick(cam)}  pet ${stick(pet)}`;
+        `  camera ${stick(cam)}  pet ${stick(pet)}  ball stick ${input.state.ballAxis.toFixed(1)}`;
     },
   };
 }

@@ -95,12 +95,14 @@ These checks cover joint lengths and bend limits, planted paw contacts, standing
 The page reads the Arduino directly over USB with the Web Serial API, so it needs **Chrome or Edge** (on `localhost` or https). Arduino input runs entirely in the browser.
 
 1. Plug in the board and click **Connect Arduino** (top left), then pick its port. Chrome remembers it, so later loads and re-plugs reconnect without asking.
-2. Flash `arduino/snoopy/snoopy.ino`. It prints one CSV line per sample at **9600 baud**: `touch,button,distance,camX,camY,camPress,petX,petY,petPress`, e.g. `1,0,42,512,509,0,530,500,0`. Touch, button and the stick presses are 1 while active; distance is in cm (0 or over 400 means no echo); stick axes are raw `analogRead` values. Leave the sticks alone for the first half second after connecting: the page measures where each one rests then (press **C** to measure again), so 3.3V sticks and 12-bit boards work without changes. Lines with just the first three columns still work. Change the column order, baud rate, valid range, stick dead zone or axis directions in `ARDUINO` in `web/src/input/arduino.js`. The sketch's touch, button and distance readers are stubs that return 0; drop your sensor code into them.
+2. Flash `arduino/snoopy/snoopy.ino`, or use firmware that sends the same format. It prints one CSV line per sample at **9600 baud**: `X1,Y1,R3_1,X2,Y2,R3_2`, e.g. `512,509,0,530,500,0`. Joystick 1's **X1 pets** and **Y1 controls the ball**; joystick 2's **X2/Y2 control the camera**. Push Y1 up or down once to ready the ball, return to centre, then push again to throw. Holding it triggers only once. Send raw `analogRead` axis values and `1` for pressed switches (`0` released), with a newline after each sample and no header. Leave the sticks alone for the first half second after connecting: the page measures where each one rests then (press **C** to measure again), so 3.3V sticks and 12-bit boards work without changes. Change the column order, baud rate, stick dead zone or axis directions in `ARDUINO` in `web/src/input/arduino.js`.
+
+Older firmware can still send `touch,button,distance` or `touch,button,distance,camX,camY,camPress,petX,petY,petPress`. Touch and button are `1` while active; distance is in cm. Six-column joystick messages do not update these separate sensor controls.
 
 | Joystick | VRx | VRy | SW |
 | --- | --- | --- | --- |
-| 1: camera | A2 | A3 | D3 |
-| 2: petting | A0 | A1 | D2 |
+| 1: petting / ball | A0 | A1 | D2 |
+| 2: camera | A2 | A3 | D3 |
 
 | Sensor | Action |
 | --- | --- |
@@ -108,7 +110,7 @@ The page reads the Arduino directly over USB with the Web Serial API, so it need
 | Button | 1st press: ball in hand. 2nd press: throw it; the dog fetches it and brings it toward the camera |
 | Distance | The closer you are, the closer the camera gets to the dog (10–80 cm maps to the scene's zoom range); after 1 s without readings the mouse wheel takes over |
 | Camera stick | Left/right orbits around the dog, up/down tilts the camera; speed follows how far you push. Click: ease back to the starting view |
-| Pet stick | Pushing it pets the dog (harder the further you push) and the dog leans towards that side of the screen. Click: full pet, like touch |
+| Joystick 1 | Horizontal: pet the dog, harder the further you push. Vertical: ready/throw the ball, returning to centre between pushes. Click: full pet, like touch |
 
 Without the board, use the keyboard: hold **T** to pet, **B** for the button, **[** / **]** for a simulated distance, **0** to stop it, **arrow keys** for the camera stick (**R** to reset the view) and **I/J/K/L** for the pet stick. The HUD shows each stick's raw values in brackets. In the console, `snoopy.arduino.feedLine("1,0,42")` runs a line through the same parser.
 

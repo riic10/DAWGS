@@ -2,15 +2,15 @@
 // Edge; needs localhost or https). No server code involved.
 //
 // The firmware prints one CSV line per sample, e.g.
-// "1,0,42,512,509,0,530,500,0\r\n" (see arduino/snoopy/snoopy.ino). Lines with
-// only the first three columns (older firmware) still work; the sticks then
-// stay centred.
+// "512,509,0,530,500,0\r\n": X1,Y1,R3_1,X2,Y2,R3_2, with X1 petting,
+// Y1 ball, and X2/Y2 camera (see arduino/snoopy/snoopy.ino). The older 3-column sensor
+// and 9-column sensor + joystick formats are also accepted.
 export const ARDUINO = {
   baudRate: 9600, // must match Serial.begin() in arduino/snoopy/snoopy.ino
   // CSV column order the firmware prints. Stick axes are raw analogRead
   // values; stick clicks are 1 while pressed.
-  columns: ["touch", "button", "distance", "camX", "camY", "camPress", "petX", "petY", "petPress"],
-  minColumns: 3,
+  columns: ["petX", "petY", "petPress", "camX", "camY", "camPress"],
+  legacyColumns: ["touch", "button", "distance", "camX", "camY", "camPress", "petX", "petY", "petPress"],
   distanceValid: [2, 400], // cm; 0 or out of range means no echo (HC-SR04 timeout)
   buttonDebounceMs: 150,
   stick: {
@@ -22,6 +22,8 @@ export const ARDUINO = {
     calibrateSamples: 12, // ~0.5 s at 25 lines/s
     minRest: 100, // an axis resting lower isn't a stick (e.g. a 0/1 column); it reads 0
     deadZone: 0.12, // of full deflection; cheap sticks wobble around their rest
+    ballPress: 0.65, // normalized Y1 deflection in either direction triggers once
+    ballRelease: 0.25, // return near centre before another ball action
     // Flip an axis if pushing the stick moves things the wrong way; it depends
     // on how the module is mounted.
     invert: { camX: false, camY: false, petX: false, petY: false },
@@ -46,6 +48,7 @@ export function createArduinoInput() {
   const events = new EventTarget();
   const state = {
     connected: false, touch: false, button: false, distance: null, distanceAt: -Infinity,
+    ballAxis: 0, // normalized Y1 in the six-column format
     cam: { x: 0, y: 0, pressed: false, raw: null },
     pet: { x: 0, y: 0, pressed: false, raw: null },
     rest: null, // { camX, camY, petX, petY } once calibrated
@@ -55,6 +58,7 @@ export function createArduinoInput() {
   };
   let badLogged = 0;
   let lastPressAt = -Infinity;
+  let ballAxisHeld = false;
 
   const emit = (type, detail) => events.dispatchEvent(new CustomEvent(type, { detail }));
 
@@ -79,6 +83,7 @@ export function createArduinoInput() {
   function calibrate() {
     state.rest = null;
     calibrationRows = [];
+    setBallAxis(0);
   }
   function learnRest(row) {
     calibrationRows.push(row);
@@ -121,21 +126,38 @@ export function createArduinoInput() {
     emit("distance", cm);
   }
 
+  // One vertical push is one ball-button action, even while held or jittering.
+  // First push readies the ball; centre the stick, then push again to throw.
+  function setBallAxis(value) {
+    state.ballAxis = value;
+    const magnitude = Math.abs(value);
+    if (magnitude <= ARDUINO.stick.ballRelease) ballAxisHeld = false;
+    else if (!ballAxisHeld && magnitude >= ARDUINO.stick.ballPress) {
+      ballAxisHeld = true;
+      emit("buttonpress");
+    }
+  }
+
   // Parse one CSV line from the firmware. Returns false (and changes nothing)
   // for anything malformed: wrong column count, non-numbers, boot chatter.
   function feedLine(line) {
     const parts = line.trim().split(",");
-    if (parts.length < ARDUINO.minColumns || parts.length > ARDUINO.columns.length) return false;
+    const columns = parts.length === ARDUINO.columns.length ? ARDUINO.columns
+      : parts.length === 3 || parts.length === ARDUINO.legacyColumns.length ? ARDUINO.legacyColumns : null;
+    if (!columns) return false;
     const values = parts.map((p) => (p.trim() === "" ? NaN : Number(p)));
     if (values.some((v) => !Number.isFinite(v))) return false;
-    const row = Object.fromEntries(values.map((v, i) => [ARDUINO.columns[i], v]));
-    setTouch(row.touch !== 0);
-    setButton(row.button !== 0);
-    setDistance(row.distance);
-    if (!state.rest && row.camX !== undefined) learnRest(row); // sticks read 0 until this finishes
+    const row = Object.fromEntries(values.map((v, i) => [columns[i], v]));
+    if (row.touch !== undefined) setTouch(row.touch !== 0);
+    if (row.button !== undefined) setButton(row.button !== 0);
+    if (row.distance !== undefined) setDistance(row.distance);
+    if (!state.rest && AXES.every(axis => row[axis] !== undefined)) learnRest(row); // sticks read 0 until this finishes
     const raw = (x, y) => (x === undefined ? null : [x, y]);
+    const joystickOnly = columns === ARDUINO.columns;
+    const firstY = stickAxis(row, "petY");
     setStick("cam", stickAxis(row, "camX"), stickAxis(row, "camY"), Boolean(row.camPress), raw(row.camX, row.camY));
-    setStick("pet", stickAxis(row, "petX"), stickAxis(row, "petY"), Boolean(row.petPress), raw(row.petX, row.petY));
+    setStick("pet", stickAxis(row, "petX"), joystickOnly ? 0 : firstY, Boolean(row.petPress), raw(row.petX, row.petY));
+    setBallAxis(joystickOnly ? firstY : 0);
     return true;
   }
 
@@ -206,6 +228,7 @@ export function createArduinoInput() {
     state.connected = false;
     setTouch(false);
     setButton(false);
+    setBallAxis(0);
     setStick("cam", 0, 0, false);
     setStick("pet", 0, 0, false);
     emit("connection", false);
