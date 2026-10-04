@@ -25,13 +25,15 @@ Each scene lives in `web/src/scenes/` and says where the dog stands, how the cam
 
 ## Dog animation
 
-The environment keeps the original ball-driven movement. Press **B** once to hold the ball and again to throw it, or use the Arduino button. After the ball lands, a sitting dog finishes standing before it runs to fetch. Its legs animate while running and turning, and it returns to its original pose after bringing the ball home.
+The environment keeps the original ball-driven movement. Press **B** once to hold the ball and again to throw it, or use the Arduino button. After the ball lands, a sitting dog finishes standing before it runs to fetch. It brings the ball toward your current camera position, faces you, and returns to its previous sitting or standing pose after delivery.
 
 The sample dog uses joint chains with fixed bone lengths and bend limits. It accelerates from a four-beat walk into a diagonal trot, then slows as it approaches the ball. Shoulder blades, pelvis, wrists, and hocks participate in each stride while paw contacts stay planted between steps. The neck and head turn separately to track the ball. Standing shifts its weight forward before raising its hips.
 
-At pickup, the dog plants its feet, lowers its head, and reaches the ball with its neck and mouth. The ball stays grounded until contact, then follows a grip fitted to the lip line and ball radius. A small lower-jaw hinge opens for pickup and release. At home, the dog lowers and releases the ball into gravity before returning to its original pose. A ball too close to the chest prompts a backward approach to make room.
+At pickup, the dog plants its feet, opens its jaw, and reaches the ball with its neck and mouth. The ball stays grounded until the upper and lower lips close around it, with the jaw angle fitted to the ball radius. It lifts and carries the ball at that grip, then lowers it and opens its jaw before releasing it into gravity. A ball too close to the chest prompts a backward approach to make room. Small inner mouth surfaces fill the opening that the original closed-mouth scan does not contain.
 
-Petting turns the head toward the viewer, lifts the chin, and leans the neck into the scratch. Holding touch keeps a slow neck response and tail wag active, with the hips steady and paws planted. It settles gradually when touch ends, and fetching takes priority. The source scan has a closed mouth, so jaw movement stays restrained.
+The return route follows camera movement until the dog starts putting the ball down. It chooses connected, unblocked ground where the dog and delivered ball remain visible, including when the camera is outside the floor. The dog stays at the delivery point, and the next throw aims around its new position. If no visible delivery spot is reachable, it holds the ball and waits for the camera to move to a clearer view.
+
+Petting turns the head toward the viewer, lifts the chin, and leans the neck into the scratch. Holding touch keeps a slow neck response and tail wag active, with the hips steady and paws planted. It settles gradually when touch ends, and fetching takes priority.
 
 The procedural gait timing and joint movement are informed by [Catavitello et al. (2015)](https://pmc.ncbi.nlm.nih.gov/articles/PMC4517757/) and [Fischer's canine locomotion research](https://www.vdh.de/fileadmin/media/dog-health/abstracts/Dogs_in_motion_-_Interdependencies_of_skeleton_muscles_and_locomotion.pdf). The curves are hand tuned to this scan, not imported motion capture.
 

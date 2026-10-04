@@ -17,7 +17,10 @@ function fetchGame(standing = false, dt = 1 / 60, groundHeight = (_x: number, _z
   const previousPosition = new Vector3();
   const up = new Vector3(0, 1, 0);
   const dog = {
-    root, body, height: 0.8, length: 1, pickup: 0, mouthRadius: 0, jawOpen: 0, joints,
+    root, body, height: 0.8, length: 1, width: 0.25, pickup: 0, mouthRadius: 0, jawOpen: 0, joints,
+    get gripAmount() { return joints.jaw.gripAngle / joints.jaw.openAngle; },
+    get gripReady() { return Math.abs(joints.jaw.angle - joints.jaw.gripAngle) < 0.015; },
+    get releaseReady() { return joints.jaw.angle > joints.jaw.gripAngle + 0.14; },
     motion: createDogMotion(),
     home: { ground: new Vector3(), normal: up.clone(), facing: 0.3 },
     facing: 0.3,
@@ -86,13 +89,13 @@ function fetchGame(standing = false, dt = 1 / 60, groundHeight = (_x: number, _z
     assert.ok(condition(), `fetch stalled in ${ball.state}`);
   };
   const sphere = scene.children.find(object => (object as Mesh).geometry?.type === "SphereGeometry")!;
-  return { dog, ball, sphere, states, tick, until, press: () => press() };
+  return { dog, ball, sphere, camera, states, tick, until, press: () => press() };
 }
 
 test("a sitting dog finishes standing before fetch movement and sits again on return", (t) => {
   const random = mock.method(Math, "random", () => 0.5);
   t.after(() => random.mock.restore());
-  const { dog, ball, states, tick, until, press } = fetchGame();
+  const { dog, ball, camera, states, tick, until, press } = fetchGame();
   press();
   tick();
   assert.equal(states.at(-1), "ready");
@@ -134,12 +137,13 @@ test("a sitting dog finishes standing before fetch movement and sits again on re
   assert.ok(outboundSpeeds.at(-1)! < 0.65);
   assert.equal(dog.pickup, 0);
   assert.deepEqual(states, ["ready", "flying", "standing", "fetching", "collecting", "returning", "dropping", "idle"]);
-  assert.ok(dog.root.position.equals(dog.home.ground));
+  assert.ok(dog.root.position.distanceTo(dog.home.ground) > 1);
+  assert.ok(Math.hypot(dog.root.position.x - camera.position.x, dog.root.position.z - camera.position.z) < 3.5);
   until(() => dog.motion.stand === 0);
-  assert.equal(dog.facing, dog.home.facing);
+  assert.ok(dog.forward().dot(camera.position.clone().sub(dog.root.position).setY(0).normalize()) > 0.99);
 });
 
-test("the mouth contacts the stationary ball before gripping, then releases it into gravity at home", (t) => {
+test("the jaws close around the grounded ball before lifting and open before releasing it", (t) => {
   const random = mock.method(Math, "random", () => 0.5);
   t.after(() => random.mock.restore());
   const { dog, ball, sphere, tick, until, press } = fetchGame();
@@ -153,6 +157,9 @@ test("the mouth contacts the stationary ball before gripping, then releases it i
     else if (!attached) {
       assert.ok(sphere.position.distanceTo(grounded) < 0.067 * 0.08);
       assert.ok(sphere.position.distanceTo(dog.mouthWorld()) < 1e-9);
+      assert.ok(dog.gripReady, "the lower jaw must close around the ball before it lifts");
+      assert.ok(Math.abs(dog.joints.jaw.upper.distanceTo(dog.joints.mouth) * 0.9 - 0.067) < 1e-8);
+      assert.ok(Math.abs(dog.joints.jaw.lower.distanceTo(dog.joints.mouth) * 0.9 - 0.067) < 0.002);
       attached = true;
     }
   }
@@ -161,6 +168,7 @@ test("the mouth contacts the stationary ball before gripping, then releases it i
   until(() => ball.state === "dropping");
   until(() => !ball.attached);
   const release = sphere.position.clone();
+  assert.ok(dog.releaseReady, "release waits for an open jaw");
   assert.ok(release.distanceTo(dog.mouthWorld()) < 0.015, "release should start at the mouth");
   assert.ok(release.y > 0.067);
   tick();
@@ -172,16 +180,37 @@ test("the mouth contacts the stationary ball before gripping, then releases it i
 test("an already standing dog fetches without a sit transition and stays standing", (t) => {
   const random = mock.method(Math, "random", () => 0.5);
   t.after(() => random.mock.restore());
-  const { dog, ball, states, tick, until, press } = fetchGame(true);
+  const { dog, ball, camera, states, tick, until, press } = fetchGame(true);
   for (let round = 0; round < 2; round++) {
     press(); tick(); press();
     until(() => ball.state === "idle");
     assert.equal(dog.motion.target, 1);
     assert.equal(dog.motion.stand, 1);
-    assert.ok(dog.root.position.equals(dog.home.ground));
+    assert.ok(Math.hypot(dog.root.position.x - camera.position.x, dog.root.position.z - camera.position.z) < 3.5);
   }
   assert.ok(!states.includes("standing"));
   assert.equal(states.filter(state => state === "returning").length, 2);
+});
+
+test("delivery follows a moved viewer, then holds its destination while releasing the ball", (t) => {
+  const random = mock.method(Math, "random", () => 0.5);
+  t.after(() => random.mock.restore());
+  const { dog, ball, camera, tick, until, press } = fetchGame(true);
+  press(); tick(); press();
+  until(() => ball.state === "returning");
+  camera.position.set(-3, 2, 3);
+  camera.lookAt(0, 0.4, 0);
+  until(() => ball.state === "dropping");
+  const delivered = dog.root.position.clone();
+  assert.ok(Math.hypot(delivered.x - camera.position.x, delivered.z - camera.position.z) < 3.5);
+  camera.position.set(4, 2, -4);
+  until(() => ball.state === "idle");
+  assert.ok(dog.root.position.equals(delivered));
+  camera.lookAt(delivered);
+  press(); tick(); press();
+  until(() => ball.state === "idle");
+  assert.ok(dog.root.position.distanceTo(delivered) > 3);
+  assert.ok(Math.hypot(dog.root.position.x - camera.position.x, dog.root.position.z - camera.position.z) < 3.5);
 });
 
 test("a ball close to the chest gets a backward approach and remains reachable on slow frames", (t) => {

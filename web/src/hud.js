@@ -6,8 +6,9 @@ const GAME_TEXT = {
   standing: "dog: standing up",
   collecting: "dog: picking up ball",
   fetching: "dog: fetching",
-  returning: "dog: bringing it back",
+  returning: "dog: bringing you the ball",
   dropping: "dog: putting the ball down",
+  deliveryBlocked: "dog: waiting for a clear place to bring the ball",
 };
 
 export function createHud(input) {

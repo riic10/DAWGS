@@ -1,10 +1,11 @@
 import * as THREE from "three";
 import { createShadow } from "../shadow.js";
 import { angleDelta } from "../dog.js";
+import { planDelivery } from "./delivery.js";
 
 // Button -> fetch game. 1st press: a ball appears in "your hand" in front of
 // the camera. 2nd press: throw it toward the dog. It bounces and rolls to a stop on the
-// ground, then the dog fetches it and drops it back at its spot.
+// ground, then the dog fetches it and brings it to the viewer.
 //
 // Distances are in metres and scaled by the scene's units per metre.
 export const BALL = {
@@ -60,13 +61,15 @@ export function createBall({ scene, camera, dog, input, world, onState }) {
   const tmp = new THREE.Vector3();
   const pickupStart = new THREE.Vector3();
   const dropTarget = new THREE.Vector3();
+  const lastViewer = new THREE.Vector3(), lastViewDirection = new THREE.Vector3(), viewDirection = new THREE.Vector3();
 
   let state = "idle";
   let stateTime = 0;
   let slowTime = 0;
   let returnPose = dog.motion.target;
   let runSpeed = 0;
-  let attached = false, gripTime = 0, releasedAt = null;
+  let attached = false, closing = false, gripTime = 0, releasedAt = null;
+  let delivery = null, waypoint = 0, plannedAt = -Infinity, deliveryBlocked = false;
 
   function setState(next) {
     state = next;
@@ -85,7 +88,7 @@ export function createBall({ scene, camera, dog, input, world, onState }) {
   }
 
   // Wait for standing to finish before moving the dog along the fetch path.
-  function runToward(x, z, dt, arrived, stopDistance = 0) {
+  function runToward(x, z, dt, arrived, stopDistance = 0, followPath = false) {
     if (dog.motion.stand !== 1) return false;
     const p = dog.root.position;
     const azimuth = Math.atan2(x - p.x, z - p.z);
@@ -93,7 +96,7 @@ export function createBall({ scene, camera, dog, input, world, onState }) {
       runSpeed = 0;
       return true;
     }
-    const facingOk = turnToward(azimuth, dt) || Math.abs(angleDelta(dog.facing, azimuth)) < 0.6;
+    const facingOk = turnToward(azimuth, dt) || Math.abs(angleDelta(dog.facing, azimuth)) < (followPath ? 0.15 : 0.6);
     if (facingOk) {
       const remaining = Math.hypot(x - p.x, z - p.z);
       const travel = remaining - stopDistance;
@@ -101,8 +104,9 @@ export function createBall({ scene, camera, dog, input, world, onState }) {
       const targetSpeed = Math.min(travel < 0 ? 0.4 : BALL.runSpeed, Math.max(0.15, brakingSpeed));
       runSpeed += Math.sign(targetSpeed - runSpeed) * Math.min(Math.abs(targetSpeed - runSpeed), BALL.runAcceleration * dt);
       const stepLen = Math.sign(travel) * Math.min(Math.abs(travel), runSpeed * upm * dt);
-      const nx = p.x + Math.sin(dog.facing) * stepLen;
-      const nz = p.z + Math.cos(dog.facing) * stepLen;
+      const heading = followPath ? azimuth : dog.facing;
+      const nx = p.x + Math.sin(heading) * stepLen;
+      const nz = p.z + Math.cos(heading) * stepLen;
       const G = groundAt(nx, nz) ?? fallbackGround;
       dog.setPose(tmp.set(nx, G.y, nz), dog.facing, G.normal);
     } else runSpeed = 0;
@@ -177,12 +181,12 @@ export function createBall({ scene, camera, dog, input, world, onState }) {
       // first lands it a little past or short of the dog. Solves for the
       // height drop to the aim point too: the ball starts at the camera,
       // usually well above the dog's ground, and the path slopes.
-      const home = dog.home.ground;
+      const dogPosition = dog.root.position;
       const side = Math.random() < 0.5 ? -1 : 1;
-      const heading = Math.atan2(home.x - pos.x, home.z - pos.z) + side * THREE.MathUtils.randFloat(...BALL.throwSpread);
+      const heading = Math.atan2(dogPosition.x - pos.x, dogPosition.z - pos.z) + side * THREE.MathUtils.randFloat(...BALL.throwSpread);
       const range = Math.max(
         BALL.minThrow * upm,
-        Math.hypot(home.x - pos.x, home.z - pos.z) + THREE.MathUtils.randFloat(...BALL.landPastDog) * upm,
+        Math.hypot(dogPosition.x - pos.x, dogPosition.z - pos.z) + THREE.MathUtils.randFloat(...BALL.landPastDog) * upm,
       );
       const aimX = pos.x + Math.sin(heading) * range, aimZ = pos.z + Math.cos(heading) * range;
       const drop = pos.y - ((groundAt(aimX, aimZ) ?? fallbackGround).y + radius);
@@ -206,7 +210,8 @@ export function createBall({ scene, camera, dog, input, world, onState }) {
   return {
     get state() { return state; },
     get attached() { return attached; },
-    // The dog can be petted while it's at home.
+    get deliveryTarget() { return delivery?.points.at(-1) ?? null; },
+    // Touch is available between fetches, wherever the last delivery finished.
     dogAtHome: () => state === "idle" || state === "ready",
 
     update(dt) {
@@ -249,24 +254,48 @@ export function createBall({ scene, camera, dog, input, world, onState }) {
         if (done) {
           pickupStart.copy(pos);
           dog.reachMouth(pickupStart);
+          closing = false;
           gripTime = 0;
+          delivery = null;
+          plannedAt = -Infinity;
           setState("collecting");
         }
       } else if (state === "collecting") {
         dog.pickup = Math.min(1, stateTime / BALL.pickupSeconds);
-        dog.jawOpen = attached ? 0.5 : 1;
+        dog.jawOpen = closing ? dog.gripAmount : 1;
         if (attached) gripTime += dt;
         if (gripTime >= BALL.gripSeconds) setState("returning");
       } else if (state === "returning") {
-        dog.jawOpen = 0.5;
+        dog.jawOpen = dog.gripAmount;
         dog.pickup = Math.max(0, dog.pickup - dt / BALL.liftSeconds);
         if (dog.pickup > 0) return;
         dog.reachMouth(null);
-        const home = dog.home.ground;
-        const there = runToward(home.x, home.z, dt, () =>
-          Math.hypot(dog.root.position.x - home.x, dog.root.position.z - home.z) < 0.02 * dog.length);
-        if (there && turnToward(dog.home.facing, dt)) {
-          dog.setPose(home, dog.home.facing, dog.home.normal);
+        camera.getWorldDirection(viewDirection);
+        if (stateTime - plannedAt > 0.35 && (!delivery || camera.position.distanceTo(lastViewer) > 0.12 * upm
+          || viewDirection.distanceTo(lastViewDirection) > 0.08)) {
+          delivery = planDelivery({
+            start: dog.root.position, camera, ground, unitsPerMeter: upm,
+            clearance: Math.max(0.08 * upm, dog.width * 0.5),
+            reach: dog.pickupPoint(tmp).sub(dog.root.position).setY(0).length(),
+            height: dog.height,
+          });
+          waypoint = 0;
+          plannedAt = stateTime;
+          lastViewer.copy(camera.position);
+          lastViewDirection.copy(viewDirection);
+          if (deliveryBlocked !== !delivery) {
+            deliveryBlocked = !delivery;
+            onState?.(deliveryBlocked ? "deliveryBlocked" : "returning");
+          }
+        }
+        if (!delivery) return;
+        const destination = delivery.points[waypoint];
+        const there = runToward(destination.x, destination.z, dt, () =>
+          Math.hypot(dog.root.position.x - destination.x, dog.root.position.z - destination.z) < 0.004 * upm, 0, true);
+        if (there && waypoint < delivery.points.length - 1) { waypoint++; return; }
+        if (there && turnToward(delivery.facing, dt)) {
+          const arrivalGround = groundAt(destination.x, destination.z);
+          dog.setPose(destination, delivery.facing, arrivalGround.normal);
           dog.motion.speed = dog.motion.turn = dog.motion.stride = 0;
           dog.pickupPoint(dropTarget);
           const G = groundAt(dropTarget.x, dropTarget.z) ?? fallbackGround;
@@ -279,8 +308,8 @@ export function createBall({ scene, camera, dog, input, world, onState }) {
       } else if (state === "dropping") {
         if (releasedAt === null) {
           dog.pickup = Math.min(1, stateTime / BALL.pickupSeconds);
-          dog.jawOpen = stateTime < BALL.pickupSeconds ? 0.5 : 1;
-          if (stateTime >= BALL.pickupSeconds + BALL.gripSeconds) {
+          dog.jawOpen = stateTime < BALL.pickupSeconds ? dog.gripAmount : 1;
+          if (stateTime >= BALL.pickupSeconds + BALL.gripSeconds && dog.releaseReady) {
             attached = false;
             releasedAt = stateTime;
             vel.set(0, 0, 0);
@@ -312,8 +341,11 @@ export function createBall({ scene, camera, dog, input, world, onState }) {
         camera.localToWorld(pos.copy(BALL.holdMeters).multiplyScalar(upm));
       } else if (state === "collecting") {
         if (!attached && mouthWorld(tmp).distanceTo(pos) < radius * 0.08) {
-          attached = true;
-          shadow.setVisible(false);
+          closing = true;
+          if (dog.gripReady) {
+            attached = true;
+            shadow.setVisible(false);
+          }
         }
       }
       if (attached) mouthWorld(pos);

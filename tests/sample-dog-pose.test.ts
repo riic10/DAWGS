@@ -99,7 +99,7 @@ test("fast fetches retain paw contacts when a frame crosses touchdown or skips a
 
 test("head and neck share a bounded look direction and the mouth follows the head", () => {
   const pose = createSampleDogPose(), motion = createDogMotion(), world = new Matrix4();
-  const restMouth = new Vector3(-0.405, -0.212, 0);
+  const restMouth = new Vector3(-0.395, -0.213, 0);
   for (const target of [new Vector3(-2, -1, 3), new Vector3(3, 1, -4)]) {
     for (let frame = 0; frame < 120; frame++) pose.update(motion, 1 / 60, world, { target });
     assert.ok(Math.abs(pose.gaze.yaw) <= 1.15);
@@ -119,7 +119,7 @@ test("pickup reaches a grounded ball through the neck and head at different worl
     const world = new Matrix4().makeRotationY(0.8).multiply(new Matrix4().makeRotationX(Math.PI))
       .scale(new Vector3(scale, scale, scale)).setPosition(2, 0.405 * scale, -4);
     const radius = 0.074 * scale;
-    const target = new Vector3(-0.60, 0.405 - radius / scale, 0).applyMatrix4(world);
+    const target = new Vector3(-0.54, 0.405 - radius / scale, 0).applyMatrix4(world);
     for (let frame = 0; frame < 90; frame++) {
       pose.update(motion, 1 / 60, world, { pickup: Math.min(1, frame / 45), mouthTarget: target, mouthRadius: radius });
       checkSkeleton(pose);
@@ -127,6 +127,26 @@ test("pickup reaches a grounded ball through the neck and head at different worl
     assert.ok(pose.mouth.clone().applyMatrix4(world).distanceTo(target) < 1e-7,
       "the mouth must reach the ball before the ball attaches");
     pose.feet.forEach(foot => assert.ok(pose.posed[foot.base + 2].end.clone().applyMatrix4(world).distanceTo(foot.anchor) < 1e-7));
+  }
+});
+
+test("upper and lower lips contact the same ball at the grip angle across scales and radii", () => {
+  for (const scale of [0.75, 3]) {
+    for (const radius of [0.035, 0.074, 0.095]) {
+      const pose = createSampleDogPose(), motion = createDogMotion();
+      const world = new Matrix4().makeScale(scale, scale, scale);
+      for (let frame = 0; frame < 90; frame++) pose.update(motion, 1 / 60, world, { mouthRadius: radius * scale, jawOpen: 1 });
+      assert.ok(pose.jaw.angle > pose.jaw.gripAngle + 0.14);
+      const amount = pose.jaw.gripAngle / pose.jaw.openAngle;
+      for (let frame = 0; frame < 90; frame++) {
+        pose.update(motion, 1 / 60, world, { mouthRadius: radius * scale, jawOpen: amount });
+        checkSkeleton(pose);
+      }
+      assert.ok(Math.abs(pose.jaw.upper.distanceTo(pose.mouth) - radius) < 1e-8);
+      assert.ok(Math.abs(pose.jaw.lower.distanceTo(pose.mouth) - radius) < 1e-8);
+      for (let frame = 0; frame < 120; frame++) pose.update(motion, 1 / 60, world, { mouthRadius: radius * scale });
+      assert.ok(pose.jaw.upper.distanceTo(pose.jaw.lower) < 1e-8);
+    }
   }
 });
 

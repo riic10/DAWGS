@@ -1,5 +1,6 @@
 import { Matrix4, Quaternion, Vector3 } from "three";
 import type { DogMotion } from "./dog-motion";
+import { JAW_HINGE, UPPER_LIP, sampleDogGrip } from "./sample-dog-mouth";
 
 export type Segment = { start: Vector3; end: Vector3 };
 export type DogAttention = {
@@ -49,7 +50,7 @@ function sampleDogRest(): Segment[] {
     rest.push({ start: point(-0.07, -0.04, side * 0.105), end: point(-0.15, 0.04, side * 0.105) });
   }
   rest.push({ start: point(0.24, 0.23), end: point(0.31, 0.24) });
-  rest.push({ start: point(-0.26, -0.20), end: point(-0.405, -0.208) });
+  rest.push({ start: JAW_HINGE.clone(), end: UPPER_LIP.clone() });
   return rest;
 }
 
@@ -79,9 +80,11 @@ export function createSampleDogPose() {
   const from = new Vector3(), to = new Vector3(), unit = point(1, 1, 1);
   const bodyRotation = new Quaternion(), headLocalRotation = new Quaternion();
   const aimRotation = new Quaternion(), reachJoint = new Vector3(), reachEnd = new Vector3();
-  const mouthRest = point(-0.405, -0.212), pickupGround = point(-0.60, FLOOR);
+  const mouthRest = UPPER_LIP.clone(), pickupGround = point(-0.55, FLOOR);
   const pickupChest = rest[0].start.clone().add(STAND_SHIFT).add(PICKUP_SHIFT);
   const mouth = new Vector3();
+  const jaw = { angle: 0, gripAngle: 0, openAngle: 0.65, upper: new Vector3(), lower: new Vector3() };
+  let mouthRadius = -1;
   const feet = LEG_BASES.map((base, i) => ({
     base, rear: i % 2 === 1, offset: WALK_OFFSETS[i], correction: 0, cycle: 0, swing: 0,
     anchor: new Vector3(), start: new Vector3(), goal: new Vector3(),
@@ -91,7 +94,14 @@ export function createSampleDogPose() {
   }));
   let phase = 0.32, trot = 0, activity = 0, yaw = 0, pitch = 0, previousStand = 0, previousTarget = 0;
   let previousMoving = false;
-  let petSide = 1, jawAngle = 0;
+  let petSide = 1;
+
+  function pickupApproach(target: Vector3, result = new Vector3()) {
+    // Leave neck extension available when the ball and paws rest at different ground heights.
+    const reach = 0.94 * (rest[1].start.distanceTo(rest[1].end) + rest[2].start.distanceTo(mouthRest));
+    const forward = Math.sqrt(Math.max(0.08 ** 2, reach ** 2 - (target.y - pickupChest.y) ** 2 - target.z ** 2));
+    return result.set(pickupChest.x - forward, target.y, target.z);
+  }
 
   function transformBone(i: number) {
     matrices[i].compose(posed[i].start, rotations[i], unit)
@@ -99,15 +109,9 @@ export function createSampleDogPose() {
   }
 
   return {
-    rest, posed, matrices, feet, mouth, pickupGround,
+    rest, posed, matrices, feet, mouth, pickupGround, jaw, pickupApproach,
     get gaze() { return { yaw, pitch }; },
     get gait() { return { phase, trot, activity }; },
-    pickupApproach(target: Vector3, result = new Vector3()) {
-      // Leave neck extension available when the ball and paws rest at different ground heights.
-      const reach = 0.94 * (rest[1].start.distanceTo(rest[1].end) + rest[2].start.distanceTo(mouthRest));
-      const forward = Math.sqrt(Math.max(0.08 ** 2, reach ** 2 - (target.y - pickupChest.y) ** 2 - target.z ** 2));
-      return result.set(pickupChest.x - forward, target.y, target.z);
-    },
     update(motion: DogMotion, dt = 1 / 60, world = identity,
       attention: DogAttention = {}, groundHeight?: GroundHeight) {
       dt = clamp(dt, 0, 0.1);
@@ -187,7 +191,14 @@ export function createSampleDogPose() {
         .multiply(headLocalRotation.setFromAxisAngle(Z, -pitch * 0.4 + neckLean))
         .multiply(headLocalRotation.setFromAxisAngle(X, -(0.24 + 0.04 * nuzzle) * pet * petSide));
       const radius = Math.max(0, attention.mouthRadius ?? 0) / scale;
-      mouthRest.set(-0.405 - radius * 0.45, -0.212 + radius * 0.28, 0);
+      if (Math.abs(radius - mouthRadius) > 1e-8) {
+        mouthRadius = radius;
+        const grip = sampleDogGrip(radius);
+        mouthRest.copy(grip.center);
+        jaw.gripAngle = grip.angle;
+        jaw.openAngle = grip.openAngle;
+        pickupGround.x = pickupApproach(to.set(0, FLOOR - radius, 0), from).x;
+      }
       if (attention.mouthTarget && pickup > 0) {
         // Reach the grounded ball with fixed neck and skull lengths before attaching it.
         to.copy(attention.mouthTarget).applyMatrix4(inverse);
@@ -205,11 +216,13 @@ export function createSampleDogPose() {
       posed[2].end.copy(rest[2].end).sub(rest[2].start).applyQuaternion(rotations[2]).add(posed[2].start);
       transformBone(1); transformBone(2);
       mouth.copy(mouthRest).applyMatrix4(matrices[2]);
-      jawAngle += (clamp(attention.jawOpen ?? 0, 0, 1) * 0.45 - jawAngle) * (1 - Math.exp(-dt * 18));
+      jaw.angle += (clamp(attention.jawOpen ?? 0, 0, 1) * jaw.openAngle - jaw.angle) * (1 - Math.exp(-dt * 18));
       posed[JAW].start.copy(rest[JAW].start).applyMatrix4(matrices[2]);
-      rotations[JAW].copy(rotations[2]).multiply(headLocalRotation.setFromAxisAngle(Z, -jawAngle));
+      rotations[JAW].copy(rotations[2]).multiply(headLocalRotation.setFromAxisAngle(Z, -jaw.angle));
       posed[JAW].end.copy(rest[JAW].end).sub(rest[JAW].start).applyQuaternion(rotations[JAW]).add(posed[JAW].start);
       transformBone(JAW);
+      jaw.upper.copy(UPPER_LIP).applyMatrix4(matrices[2]);
+      jaw.lower.copy(UPPER_LIP).applyMatrix4(matrices[JAW]);
 
       posed[3].start.copy(rest[3].start).applyMatrix4(matrices[PELVIS]);
       rotations[3].copy(rotations[PELVIS])

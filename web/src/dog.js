@@ -64,6 +64,9 @@ export async function loadDog(scene, { ground, normal = UP, facing, height, unit
     facing,
     groundNormal: normal.clone(),
     anim: { pet: 0, petPhase: 0, petTarget: null },
+    get gripAmount() { return rig.pose.jaw.gripAngle / rig.pose.jaw.openAngle; },
+    get gripReady() { return Math.abs(rig.pose.jaw.angle - rig.pose.jaw.gripAngle) < 0.015; },
+    get releaseReady() { return rig.pose.jaw.angle > rig.pose.jaw.gripAngle + 0.14; },
 
     setPose(point, newFacing = dog.facing, groundNormal = dog.groundNormal) {
       dog.facing = newFacing;

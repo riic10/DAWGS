@@ -43,6 +43,9 @@ for (const scene of ["office", "woods"]) {
           attached: ball.attached,
           ballPosition: carried?.position.toArray(),
           ballRadius: state.setup.ballRadius,
+          gripReady: dog.gripReady, releaseReady: dog.releaseReady,
+          upperContactError: Math.abs(joints.jaw.upper.distanceTo(joints.mouth) * dog.splats.scale.x - state.setup.ballRadius),
+          lowerContactError: Math.abs(joints.jaw.lower.distanceTo(joints.mouth) * dog.splats.scale.x - state.setup.ballRadius),
           pitch: joints.gaze.pitch,
           trot: joints.gait.trot,
         });
@@ -102,20 +105,69 @@ for (const scene of ["office", "woods"]) {
     expect(collection.filter(frame => !frame.attached).every(frame => distance(frame.ballPosition, grounded) < 1e-8)).toBe(true);
     const firstGrip = collection.find(frame => frame.attached);
     expect(firstGrip).toBeTruthy();
+    expect(firstGrip.gripReady).toBe(true);
+    expect(firstGrip.upperContactError).toBeLessThan(firstGrip.ballRadius * 0.02);
+    expect(firstGrip.lowerContactError).toBeLessThan(firstGrip.ballRadius * 0.04);
     expect(distance(firstGrip.ballPosition, grounded)).toBeLessThan(firstGrip.ballRadius * 0.08);
     const releaseIndex = frames.findIndex((frame, i) => i > 0 && frame.state === "dropping" && !frame.attached && frames[i - 1].attached);
     expect(releaseIndex).toBeGreaterThan(0);
+    expect(frames[releaseIndex].releaseReady).toBe(true);
     expect(distance(frames[releaseIndex].ballPosition, frames[releaseIndex - 1].ballPosition)).toBeLessThan(1e-8);
     const standingFramesWithContacts = frames.filter(frame => frame.stand === 1);
     expect(Math.max(...standingFramesWithContacts.map(frame => frame.footError))).toBeLessThan(1e-7);
     expect(new Set(movingFrames.flatMap(frame => frame.contacts)).size).toBe(4);
     expect(movingFrames.reduce((sum, frame) => sum + frame.contacts.length, 0) / movingFrames.length).toBeGreaterThan(1);
-    const end = await page.evaluate(() => ({ x: window.snoopy.dog.root.position.x, z: window.snoopy.dog.root.position.z }));
-    expect(end).toEqual({ x: start.x, z: start.z });
+    const end = await page.evaluate(() => {
+      const { dog, ball, camera, setup, scene } = window.snoopy;
+      const sphere = scene.children.find(object => object.geometry?.type === "SphereGeometry");
+      return {
+        position: dog.root.position.toArray(), targetError: dog.root.position.distanceTo(ball.deliveryTarget),
+        facing: dog.forward().dot(camera.position.clone().sub(dog.root.position).setY(0).normalize()),
+        ground: setup.ground.at(dog.root.position.x, dog.root.position.z),
+        ballScreen: sphere.position.clone().project(camera).toArray(), upm: setup.unitsPerMeter,
+      };
+    });
+    expect(Math.hypot(end.position[0] - start.x, end.position[2] - start.z)).toBeGreaterThan(0.2 * end.upm);
+    expect(end.targetError).toBeLessThan(1e-8);
+    expect(end.facing).toBeGreaterThan(0.99);
+    expect(end.ground.blocked).toBe(false);
+    expect(Math.abs(end.ballScreen[0])).toBeLessThan(0.9);
+    expect(Math.abs(end.ballScreen[1])).toBeLessThan(0.9);
     await page.screenshot({ path: testInfo.outputPath(`${scene}-returned.png`) });
     expect(errors).toEqual([]);
   });
 }
+
+test("delivery follows a changed camera position and repeated fetches finish at the viewer", async ({ page }, testInfo) => {
+  await page.addInitScript(() => { Math.random = () => 0.5; });
+  await page.goto("/?scene=office");
+  await page.waitForFunction(() => Boolean(window.snoopy));
+  for (let round = 0; round < 2; round++) {
+    await page.keyboard.press("b");
+    await expect(page.locator("#game")).toContainText("ready");
+    await page.waitForTimeout(180);
+    await page.keyboard.press("b");
+    await page.waitForFunction(() => window.snoopy.ball.state !== "ready", undefined, { timeout: 3000 });
+    await page.waitForFunction(() => window.snoopy.ball.state === "returning" && Boolean(window.snoopy.ball.deliveryTarget));
+    const before = await page.evaluate(round => {
+      const { camera, controls, ball } = window.snoopy;
+      const target = ball.deliveryTarget.toArray();
+      controls.enableDamping = false;
+      camera.position.sub(controls.target).applyAxisAngle({ x: 0, y: 1, z: 0 }, round ? -1.2 : 0.9).add(controls.target);
+      controls.update();
+      return target;
+    }, round);
+    await expect.poll(() => page.evaluate(before => {
+      const target = window.snoopy.ball.deliveryTarget;
+      return target ? Math.hypot(target.x - before[0], target.z - before[2]) : 0;
+    }, before)).toBeGreaterThan(0.3);
+    await page.waitForFunction(() => window.snoopy.ball.state === "dropping");
+    const atDrop = await page.evaluate(() => window.snoopy.dog.root.position.toArray());
+    await page.waitForFunction(() => window.snoopy.ball.state === "idle" && window.snoopy.dog.motion.stand === 0);
+    expect(await page.evaluate(() => window.snoopy.dog.root.position.toArray())).toEqual(atDrop);
+    await page.screenshot({ path: testInfo.outputPath(`delivery-${round + 1}.png`) });
+  }
+});
 
 test("Arduino petting moves the head and tail with grounded paws, and camera distance still works", async ({ page }) => {
   await page.goto("/?scene=office");

@@ -2,9 +2,12 @@ import { Matrix4, Vector3, Vector4 } from "three";
 import { SplatSkinning, SplatSkinningMode, type SplatMesh } from "@sparkjsdev/spark";
 import type { DogMotion } from "./dog-motion";
 import { createSampleDogPose, JAW, LEG_BASES, PELVIS, SHOULDERS, smooth, type DogAttention, type GroundHeight, type Segment } from "./sample-dog-pose";
+import { createMouthInterior } from "./sample-dog-mouth-interior";
 
 export function createSampleDogRig(mesh: SplatMesh, groundHeight?: GroundHeight) {
   const pose = createSampleDogPose();
+  const interior = createMouthInterior(pose);
+  mesh.add(interior.root);
   const { rest } = pose;
   const skin = new SplatSkinning({ mesh, numBones: rest.length, mode: SplatSkinningMode.LINEAR_BLEND });
   const identity = new Matrix4();
@@ -20,8 +23,9 @@ export function createSampleDogRig(mesh: SplatMesh, groundHeight?: GroundHeight)
   };
   mesh.forEachSplat((index, p) => {
     const head = 1 - smooth(-0.17, -0.09, p.y);
-    const jaw = smooth(-0.218, -0.202, p.y) * (1 - smooth(-0.30, -0.24, p.x))
-      * (1 - smooth(0.055, 0.09, Math.abs(p.z)));
+    const lipLine = -0.213 + (p.x + 0.395) * 0.10;
+    const jaw = smooth(lipLine - 0.002, lipLine + 0.002, p.y) * (1 - smooth(-0.29, -0.25, p.x))
+      * (1 - smooth(0.07, 0.09, Math.abs(p.z))) * (1 - smooth(-0.165, -0.145, p.y));
     const neck = (1 - head) * (1 - smooth(-0.06, 0.045, p.y)) * (1 - smooth(-0.08, 0.04, p.x));
     const tail = smooth(0.32, 0.365, p.x) * smooth(0.12, 0.24, p.y);
     const front = (1 - smooth(-0.19, -0.105, p.x)) * smooth(0.055, 0.17, p.y);
@@ -31,7 +35,7 @@ export function createSampleDogRig(mesh: SplatMesh, groundHeight?: GroundHeight)
     const shoulder = (1 - smooth(-0.075, 0.05, p.x)) * smooth(-0.10, -0.03, p.y) * (1 - smooth(0.06, 0.12, p.y));
     const pelvis = smooth(0.08, 0.24, p.x) * smooth(0.10, 0.20, p.y);
     const scores: [number, number][] = [
-      [0, torso * (1 - shoulder) * (1 - pelvis)], [1, neck], [2, head * (1 - jaw)], [3, tail], [JAW, head * jaw],
+      [0, torso * (1 - shoulder) * (1 - pelvis)], [1, neck * (1 - jaw)], [2, head * (1 - jaw)], [3, tail], [JAW, (head + neck) * jaw],
       [SHOULDERS[0], torso * shoulder * (1 - side)], [SHOULDERS[1], torso * shoulder * side],
       [PELVIS, torso * (1 - shoulder) * pelvis],
     ];
@@ -58,11 +62,13 @@ export function createSampleDogRig(mesh: SplatMesh, groundHeight?: GroundHeight)
       pose.update(motion, dt, mesh.matrixWorld, attention, groundHeight);
       pose.matrices.forEach((matrix, i) => skin.setBoneMatrix(i, matrix));
       skin.updateBones();
+      interior.update();
     },
     dispose() {
       mesh.skinning = null;
       skin.skinTexture.dispose();
       skin.boneTexture.dispose();
+      interior.dispose();
     },
   };
 }
