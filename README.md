@@ -1,4 +1,4 @@
-# SnoopyGS
+# DAWGS
 Gaussian-splat beagle in the woods or office, with animated fetching, ball physics, and Arduino input. Rendered with three.js + [Spark](https://sparkjs.dev). The Dog panel can turn a photo into a new dog with TRELLIS on Hugging Face.
 
 ## Run the viewer
